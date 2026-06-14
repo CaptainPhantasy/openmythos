@@ -107,6 +107,7 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
   const types = await readOptional(resolve(repoRoot, "src/core/types.ts"));
   const cliSource = await readOptional(resolve(repoRoot, "src/ui/cli.ts"));
   const phasesSource = await readOptional(resolve(repoRoot, "src/core/phases.ts"));
+  const runnerSource = await readOptional(resolve(repoRoot, "src/core/runner.ts"));
   const tuiSource = await readOptional(resolve(repoRoot, "src/ui/tui.ts"));
   const hasCommand = (name: string) => cliSource.includes(`program.command("${name}")`);
   const hasSessionCommand = cliSource.includes('program.command("session")');
@@ -193,6 +194,11 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
       ["src/core/phases.ts", "openmythos.config.json"],
       ["Add policy-backed verification presets by task class and risk."]
     );
+
+  const hasModelRoutingIntegration = phasesSource.includes("applyRouting") && phasesSource.includes("routeModel");
+  const hasGuardrailsIntegration = phasesSource.includes("scanForSecrets") && phasesSource.includes("summarizeRisk");
+  const hasWorktreeIntegration = runnerSource.includes("createWorktree") && runnerSource.includes("cleanupWorktree");
+  const hasMemoryIntegration = runnerSource.includes("addNote");
 
   const taskTools = extractToolUnion(types);
   const expectedTaskTools = ["shell.run", "package.install", "git.branch", "git.stage", "git.commit", "browser.verify", "api.request", "database.query"];
@@ -370,7 +376,10 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
       "OpenMythos Has A Complete Execution Fabric",
       [
         evidence("bounded.tool.loop", "real", "Model task loop supports bounded tool requests and retained task-tool-turn artifacts.", ["src/core/phases.ts", "src/core/types.ts"], []),
-        evidence("dependency.batching", "real", "Execution batches dependency-free tasks and scopes downstream handoff context.", ["src/core/phases.ts"], [])
+        evidence("dependency.batching", "real", "Execution batches dependency-free tasks and scopes downstream handoff context.", ["src/core/phases.ts"], []),
+        ...(hasModelRoutingIntegration
+          ? [evidence("model.routing", "real", "Model routing policies classify tasks by complexity/risk and populate routing context on plan tasks.", ["src/core/phases.ts", "src/core/model-routing.ts"], [])]
+          : [])
       ],
       [],
       missingTaskTools.length > 0
@@ -385,7 +394,10 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
       [
         evidence("governance.review", "real", "Governance preflight, risk review, approval stops, and task verification receipts exist.", ["src/core/governance.ts", "src/core/review.ts", "src/core/phases.ts"], []),
         evidence("local.verification", "real", "Local and task-level verification commands gate runs before model QA.", ["src/core/phases.ts"], []),
-        verificationPresetEvidence
+        verificationPresetEvidence,
+        ...(hasGuardrailsIntegration
+          ? [evidence("guardrails.scan", "real", "Security guardrails scan changed files for secrets during verify phase, blocking QA on critical findings.", ["src/core/phases.ts", "src/core/guardrails.ts"], [])]
+          : [])
       ],
       [],
       []
@@ -398,7 +410,13 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
         ...(missingRepoWorkflowCommands.length === 0
           ? [evidence("git.write.workflow", "real", "CLI exposes branch, stage, commit, rollback, publish-pr, and release-check workflow commands for repo lifecycle operations.", ["src/ui/cli.ts"], [])]
           : []
-        )
+        ),
+        ...(hasWorktreeIntegration
+          ? [evidence("worktree.isolation", "real", "Runner creates isolated git worktrees when enabled, with cleanup on completion and error paths.", ["src/core/runner.ts", "src/core/worktree.ts"], [])]
+          : []),
+        ...(hasMemoryIntegration
+          ? [evidence("repo.memory", "real", "Runner persists run notes to durable repository memory after successful completion.", ["src/core/runner.ts", "src/core/memory.ts"], [])]
+          : [])
       ],
       [],
       [
