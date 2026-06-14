@@ -34,7 +34,7 @@ exhausted.
 - Adapter profiles for fake, Z.AI GLM coding, and frontier model experiments.
 - Retained `metrics.json` artifacts and benchmark aggregation with `bench`.
 - Consecutive-round eval command for proving harness stability.
-- Read-only TUI for inspecting run state and event logs.
+- Terminal-native dashboard for inspecting run state, metrics, artifacts, and event logs.
 
 ## Installation
 

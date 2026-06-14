@@ -1,6 +1,6 @@
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import type { Phase } from "../core/types.js";
 import type { RunEvent, RunState } from "./types.js";
 
@@ -138,6 +138,14 @@ export class StateStore {
     return states.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   }
 
+  async listArtifacts(runId: string): Promise<string[]> {
+    const root = this.runDir(runId);
+    if (!existsSync(root)) {
+      return [];
+    }
+    return walkArtifacts(root, root);
+  }
+
   private async mustLoad(runId: string): Promise<RunState> {
     const state = await this.loadRun(runId);
     if (!state) {
@@ -145,4 +153,22 @@ export class StateStore {
     }
     return state;
   }
+}
+
+async function walkArtifacts(root: string, current: string): Promise<string[]> {
+  const entries = await readdir(current, { withFileTypes: true });
+  const files: string[] = [];
+
+  for (const entry of entries) {
+    const absolute = resolve(current, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...await walkArtifacts(root, absolute));
+      continue;
+    }
+    if (entry.isFile()) {
+      files.push(relative(root, absolute));
+    }
+  }
+
+  return files.sort((a, b) => a.localeCompare(b));
 }
