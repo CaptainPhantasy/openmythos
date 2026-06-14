@@ -30,7 +30,7 @@ export function renderDashboard(model: DashboardModel, selectedIndex = 0): strin
   const bench = summarizeBench(model.metrics);
 
   lines.push("OpenMythos TUI");
-  lines.push("Keys: j/down next | k/up previous | r refresh | q quit");
+  lines.push("Keys: j/down next | k/up previous | r refresh | a approve | x reject | c cancel | p queue | l replay | q quit");
   lines.push("");
   lines.push("Bench Summary");
   lines.push(`  runs=${bench.runCount} completed=${bench.completedCount} failed=${bench.failedCount} awaiting=${bench.awaitingApprovalCount}`);
@@ -125,6 +125,11 @@ export function renderDashboard(model: DashboardModel, selectedIndex = 0): strin
 
 export async function runTui(store: StateStore, once: boolean): Promise<void> {
   let selectedIndex = 0;
+  let statusLine = "";
+
+  const setStatusLine = (value: string): void => {
+    statusLine = value;
+  };
 
   const draw = async (): Promise<void> => {
     const model = await loadDashboardModel(store, selectedIndex);
@@ -133,7 +138,8 @@ export async function runTui(store: StateStore, once: boolean): Promise<void> {
     }
     const normalized = await loadDashboardModel(store, selectedIndex);
     process.stdout.write("\x1b[2J\x1b[H");
-    process.stdout.write(`${renderDashboard(normalized, selectedIndex)}\n`);
+    const output = renderDashboard(normalized, selectedIndex);
+    process.stdout.write(statusLine ? `${output}\n\nStatus: ${statusLine}\n` : `${output}\n`);
   };
 
   await draw();
@@ -150,6 +156,58 @@ export async function runTui(store: StateStore, once: boolean): Promise<void> {
         process.stdin.setRawMode(false);
         process.stdin.off("keypress", onKeypress);
         resolve();
+        return;
+      }
+      const model = await loadDashboardModel(store, selectedIndex);
+      const selectedRun = model.selectedRun;
+      if (key.name === "a" && selectedRun?.status === "awaiting_approval") {
+        try {
+          await store.approve(selectedRun.runId);
+          setStatusLine(`Run ${selectedRun.runId} approved.`);
+        } catch (error) {
+          setStatusLine(`Approve failed: ${(error as Error).message}`);
+        }
+        await draw();
+        return;
+      }
+      if (key.name === "x" && selectedRun && selectedRun.status !== "completed") {
+        try {
+          await store.reject(selectedRun.runId, "Rejected from TUI.");
+          setStatusLine(`Run ${selectedRun.runId} rejected.`);
+        } catch (error) {
+          setStatusLine(`Reject failed: ${(error as Error).message}`);
+        }
+        await draw();
+        return;
+      }
+      if (key.name === "c" && selectedRun) {
+        try {
+          await store.fail(selectedRun.runId, "Cancelled from TUI.");
+          setStatusLine(`Run ${selectedRun.runId} cancelled.`);
+        } catch (error) {
+          setStatusLine(`Cancel failed: ${(error as Error).message}`);
+        }
+        await draw();
+        return;
+      }
+      if (key.name === "p" && selectedRun && selectedRun.status !== "running") {
+        try {
+          await store.queue(selectedRun.runId);
+          setStatusLine(`Run ${selectedRun.runId} queued.`);
+        } catch (error) {
+          setStatusLine(`Queue failed: ${(error as Error).message}`);
+        }
+        await draw();
+        return;
+      }
+      if (key.name === "l" && selectedRun) {
+        try {
+          await store.queue(selectedRun.runId);
+          setStatusLine(`Run ${selectedRun.runId} queued for replay.`);
+        } catch (error) {
+          setStatusLine(`Replay failed: ${(error as Error).message}`);
+        }
+        await draw();
         return;
       }
       if (key.name === "j" || key.name === "down") {

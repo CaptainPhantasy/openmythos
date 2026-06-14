@@ -14,6 +14,7 @@ export class StateStore {
       runId,
       goal,
       status: "running",
+      approved: false,
       currentPhase: "intake",
       phasesCompleted: [],
       retryCount: 0,
@@ -78,6 +79,42 @@ export class StateStore {
     const state = await this.mustLoad(runId);
     state.status = "awaiting_approval";
     state.error = error;
+    state.approved = false;
+    await this.saveState(state);
+    return state;
+  }
+
+  async approve(runId: string): Promise<RunState> {
+    const state = await this.mustLoad(runId);
+    if (state.status !== "awaiting_approval") {
+      return state;
+    }
+    state.status = "running";
+    state.error = null;
+    state.approved = true;
+    await this.saveState(state);
+    return state;
+  }
+
+  async reject(runId: string, reason: string): Promise<RunState> {
+    const state = await this.mustLoad(runId);
+    state.approved = false;
+    state.status = "failed";
+    state.completedAt = new Date().toISOString();
+    state.error = reason;
+    await this.saveState(state);
+    return state;
+  }
+
+  async queue(runId: string): Promise<RunState> {
+    const state = await this.mustLoad(runId);
+    state.status = "running";
+    state.approved = false;
+    state.currentPhase = "intake";
+    state.phasesCompleted = [];
+    state.error = null;
+    state.approved = false;
+    state.retryCount = 0;
     await this.saveState(state);
     return state;
   }

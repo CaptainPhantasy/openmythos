@@ -383,6 +383,72 @@ test("Runner supports planner-declared verification.command requests inside a mo
   ));
 });
 
+test("Runner approve command resumes run from awaiting approval", async () => {
+  const workdir = await mkdtemp(join(tmpdir(), "openmythos-fake-approve-"));
+  const config = await loadConfigWithOptionalProfile(resolve("openmythos.config.json"), "fake");
+  config.approval.mode = "enforce";
+  config.approval.protectedPaths = ["openmythos-fake-output.txt"];
+  const runner = new Runner(config, new StateStore(resolve(workdir, "runs")), workdir);
+
+  const halted = await runner.run("fake run requiring approval");
+  assert.equal(halted.status, "awaiting_approval");
+
+  const resumed = await runner.approve(halted.runId);
+  assert.equal(resumed.status, "completed");
+  const marker = await readFile(resolve(workdir, "openmythos-fake-output.txt"), "utf8");
+  assert.equal(marker, "OPENMYTHOS_FAKE_SUCCESS\n");
+
+  const state = JSON.parse(await readFile(resolve(workdir, "runs", resumed.runId, "state.json"), "utf8") ) as { status: string };
+  assert.equal(state.status, "completed");
+});
+
+test("Runner cancel and reject commands mark runs as failed", async () => {
+  const cancelWorkdir = await mkdtemp(join(tmpdir(), "openmythos-fake-cancel-"));
+  const rejectWorkdir = await mkdtemp(join(tmpdir(), "openmythos-fake-reject-"));
+  const config = await loadConfigWithOptionalProfile(resolve("openmythos.config.json"), "fake");
+  const cancelRunner = new Runner(config, new StateStore(resolve(cancelWorkdir, "runs")), cancelWorkdir);
+  const rejectRunner = new Runner(config, new StateStore(resolve(rejectWorkdir, "runs")), rejectWorkdir);
+
+  const cancelState = await cancelRunner.run("fake run");
+  const canceled = await cancelRunner.cancel(cancelState.runId, "manual cancel");
+  assert.equal(canceled.status, "failed");
+  const cancelStateAfter = JSON.parse(await readFile(resolve(cancelWorkdir, "runs", canceled.runId, "state.json"), "utf8")) as {
+    status: string;
+    error: string | null;
+  };
+  assert.equal(cancelStateAfter.status, "failed");
+  assert.match(cancelStateAfter.error ?? "", /manual cancel/);
+
+  const rejectState = await rejectRunner.run("fake run requiring approval");
+  const rejected = await rejectRunner.reject(rejectState.runId, "manual reject");
+  assert.equal(rejected.status, "failed");
+  const rejectStateAfter = JSON.parse(await readFile(resolve(rejectWorkdir, "runs", rejected.runId, "state.json"), "utf8")) as {
+    status: string;
+    error: string | null;
+  };
+  assert.equal(rejectStateAfter.status, "failed");
+  assert.match(rejectStateAfter.error ?? "", /manual reject/);
+});
+
+test("Runner queue and replay commands remain executable from completed runs", async () => {
+  const workdir = await mkdtemp(join(tmpdir(), "openmythos-fake-queue-replay-"));
+  const config = await loadConfigWithOptionalProfile(resolve("openmythos.config.json"), "fake");
+  const runner = new Runner(config, new StateStore(resolve(workdir, "runs")), workdir);
+
+  const completed = await runner.run("fake run");
+  assert.equal(completed.status, "completed");
+
+  const queued = await runner.queue(completed.runId);
+  assert.equal(queued.status, "running");
+  const queuedState = JSON.parse(await readFile(resolve(workdir, "runs", completed.runId, "state.json"), "utf8")) as { status: string };
+  assert.equal(queuedState.status, "running");
+
+  const replayed = await runner.replay(completed.runId);
+  assert.equal(replayed.status, "completed");
+  const replayState = JSON.parse(await readFile(resolve(workdir, "runs", completed.runId, "state.json"), "utf8")) as { status: string };
+  assert.equal(replayState.status, "completed");
+});
+
 test("Runner passes only declared dependency handoff context to downstream model tasks", async () => {
   const workdir = await mkdtemp(join(tmpdir(), "openmythos-fake-dependency-handoff-"));
   const config = await loadConfigWithOptionalProfile(resolve("openmythos.config.json"), "fake");

@@ -118,27 +118,31 @@ export class PhaseExecutor {
     return normalized.plan;
   }
 
-  async execute(plan: Plan, context: ContextResult): Promise<TaskOutput[]> {
+  async execute(plan: Plan, context: ContextResult, intake?: IntakeResult, bypassReviewBlocking = false): Promise<TaskOutput[]> {
     const outputs: TaskOutput[] = [];
     this.taskReceipts = [];
     const batches = buildExecutionBatches(plan.tasks, plan.dependencies);
 
     for (const batch of batches) {
       const batchOutputs = await Promise.all(batch.map(async (task) => {
-        const execution = await this.executeTask(task, plan, context, outputs);
+        const resolvedTask: PlanTask = {
+          ...task,
+          verificationCommands: this.resolveTaskVerificationCommands(task, intake ?? null)
+        };
+        const execution = await this.executeTask(resolvedTask, plan, context, outputs);
         const review = await createReviewBundle(
           this.workdir,
           this.runDir,
-          task.id,
+          resolvedTask.id,
           execution.output.fileEdits,
           this.config.approval
         );
-        return { task, execution, review };
+        return { task: resolvedTask, execution, review };
       }));
 
       for (const item of batchOutputs) {
         this.reviews.push(item.review);
-        if (item.review.blocking) {
+        if (item.review.blocking && !bypassReviewBlocking) {
           throw new ApprovalRequiredError(item.task.id, item.review);
         }
       }
@@ -164,9 +168,14 @@ export class PhaseExecutor {
     return outputs;
   }
 
-  async verify(goal: string, plan: Plan, outputs: TaskOutput[]): Promise<QaResult> {
+  async verify(goal: string, plan: Plan, outputs: TaskOutput[], intake: IntakeResult): Promise<QaResult> {
     const localResults: ShellResult[] = [];
-    for (const command of this.config.verification.localCommands) {
+    const localVerificationCommands = this.resolveVerificationCommandSet(
+      this.config.verification.localCommands,
+      intake,
+      `goal: ${goal}\n${plan.goal}\n${plan.successCriteria.join("\n")}`
+    );
+    for (const command of localVerificationCommands) {
       localResults.push(await executeShell(command, this.workdir, this.config.execution.timeoutMs));
     }
 
@@ -229,6 +238,78 @@ export class PhaseExecutor {
         content: `Goal:\n${goal}\n\nSuccess criteria:\n${plan.successCriteria.map((criterion) => `- ${criterion}`).join("\n")}\n\nTask outputs:\n${JSON.stringify(outputs, null, 2)}\n\nTask execution receipts:\n${JSON.stringify(this.taskReceipts, null, 2)}\n\nLocal verification:\n${JSON.stringify(localResults, null, 2)}\n\nCurrent changed file contents:\n${JSON.stringify(fileState, null, 2)}`
       }]
     }, qaSchema) as QaResult;
+  }
+
+  private resolveTaskVerificationCommands(task: PlanTask, intake: IntakeResult | null): string[] {
+    const context = `${task.title}\n${task.description}\n${task.acceptanceCriteria.join("\n")}\n${task.fileTargets.join("\n")} ${task.contextQueries.join(" ")} ${task.harnessAction ?? ""}`;
+    return this.resolveVerificationCommandSet(task.verificationCommands, intake, context);
+  }
+
+  private resolveVerificationCommandSet(
+    explicitCommands: string[],
+    intake: IntakeResult | null,
+    contextText: string
+  ): string[] {
+    const commands = new Set<string>();
+    for (const command of explicitCommands) {
+      if (command.trim().length > 0) {
+        commands.add(command.trim());
+      }
+    }
+
+    const presets = this.config.verification.presets;
+    for (const command of presets.default) {
+      if (command.trim().length > 0) {
+        commands.add(command.trim());
+      }
+    }
+
+    if (intake) {
+      for (const command of presets.byRisk[intake.complexity] ?? []) {
+        if (command.trim().length > 0) {
+          commands.add(command.trim());
+        }
+      }
+
+      const matchText = `${intake.taskType} ${intake.description} ${intake.successCriteria.join(" ")} ${contextText}`;
+      const taskTypeCommands = this.matchTaskTypePresets(matchText);
+      for (const command of taskTypeCommands) {
+        if (command.trim().length > 0) {
+          commands.add(command.trim());
+        }
+      }
+    }
+
+    return [...commands];
+  }
+
+  private matchTaskTypePresets(text: string): string[] {
+    const lower = text.toLowerCase();
+    const byTaskType = this.config.verification.presets.byTaskType;
+    const matchedCommands: string[] = [];
+    const typeBuckets: Array<{ key: keyof typeof byTaskType; patterns: string[] }> = [
+      { key: "lint", patterns: ["lint", "eslint", "prettier", "format"] },
+      { key: "build", patterns: ["build", "compile", "bundle", "tsc", "vite", "webpack", "rollup"] },
+      { key: "test", patterns: ["test", "unit", "spec", "vitest", "jest", "mocha"] },
+      { key: "browser", patterns: ["browser", "ui", "frontend", "playwright", "cypress", "e2e", "smoke"] },
+      { key: "api", patterns: ["api", "endpoint", "swagger", "openapi", "request", "route"] },
+      { key: "database", patterns: ["database", "db", "sql", "sqlite", "query", "migration"] },
+      { key: "security", patterns: ["security", "audit", "sast", "license", "dependency", "secret"] },
+      { key: "performance", patterns: ["performance", "load", "latency", "benchmark", "profile"] }
+    ];
+
+    const seen = new Set<string>();
+    for (const bucket of typeBuckets) {
+      if (bucket.patterns.some((pattern) => lower.includes(pattern))) {
+        for (const command of byTaskType[bucket.key] ?? []) {
+          if (!seen.has(command)) {
+            seen.add(command);
+            matchedCommands.push(command);
+          }
+        }
+      }
+    }
+    return matchedCommands;
   }
 
   repairNotes(qa: QaResult): string {

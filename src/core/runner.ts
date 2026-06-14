@@ -13,7 +13,7 @@ import type { ContextResult, IntakeResult, IssueContext, Plan, PullRequestContex
 
 export interface RunResult {
   runId: string;
-  status: "completed" | "failed" | "awaiting_approval";
+  status: "completed" | "failed" | "awaiting_approval" | "running";
   finalOutput: string | null;
   artifacts: string[];
 }
@@ -68,8 +68,58 @@ export class Runner {
         artifacts: await this.artifacts(runId)
       };
     }
-    if (state.status === "awaiting_approval") {
+    if (state.status === "awaiting_approval" && state.approved !== true) {
       await this.store.updatePhase(runId, state.currentPhase);
+      return {
+        runId,
+        status: "awaiting_approval",
+        finalOutput: state.finalOutput,
+        artifacts: await this.artifacts(runId)
+      };
+    }
+    return this.executeFrom(runId, state.goal, undefined, state.approved === true);
+  }
+
+  async approve(runId: string): Promise<RunResult> {
+    await this.store.approve(runId);
+    return this.resume(runId);
+  }
+
+  async reject(runId: string, reason: string): Promise<RunResult> {
+    const state = await this.store.reject(runId, reason);
+    return {
+      runId,
+      status: "failed",
+      finalOutput: state.finalOutput,
+      artifacts: await this.artifacts(runId)
+    };
+  }
+
+  async cancel(runId: string, reason: string): Promise<RunResult> {
+    const state = await this.store.fail(runId, reason);
+    return {
+      runId,
+      status: "failed",
+      finalOutput: state.finalOutput,
+      artifacts: await this.artifacts(runId)
+    };
+  }
+
+  async queue(runId: string): Promise<RunResult> {
+    const state = await this.store.queue(runId);
+    return {
+      runId,
+      status: "running",
+      finalOutput: state.finalOutput,
+      artifacts: await this.artifacts(runId)
+    };
+  }
+
+  async replay(runId: string): Promise<RunResult> {
+    await this.queue(runId);
+    const state = await this.store.loadRun(runId);
+    if (!state) {
+      throw new Error(`Run not found: ${runId}`);
     }
     return this.executeFrom(runId, state.goal);
   }
@@ -77,7 +127,8 @@ export class Runner {
   private async executeFrom(
     runId: string,
     goal: string,
-    governanceSeed?: Awaited<ReturnType<typeof evaluateGovernance>>
+    governanceSeed?: Awaited<ReturnType<typeof evaluateGovernance>>,
+    bypassReviewBlocking = false
   ): Promise<RunResult> {
     const runDir = this.store.runDir(runId);
     const executor = new PhaseExecutor(this.config, new AdapterRegistry(this.config), this.workdir, runDir);
@@ -90,6 +141,8 @@ export class Runner {
     let qa = await this.store.readArtifact<QaResult>(runId, "qa.json");
     let governance = await this.store.readArtifact<Awaited<ReturnType<typeof evaluateGovernance>>>(runId, "governance.json");
 
+    const runState = await this.store.loadRun(runId);
+    const approved = bypassReviewBlocking || runState?.approved === true;
     try {
       if (!governance) {
         governance = governanceSeed ?? await evaluateGovernance(this.config, this.workdir);
@@ -140,14 +193,14 @@ export class Runner {
       while (retry <= this.config.execution.maxRetries) {
         await this.store.updatePhase(runId, "execute");
         const executeStarted = Date.now();
-        outputs = await executor.execute(plan, context);
+        outputs = await executor.execute(plan, context, intake ?? undefined, approved);
         await this.store.writeArtifact(runId, "outputs.json", outputs);
         await this.store.writeArtifact(runId, "execution.json", executor.snapshotTaskReceipts());
         await this.event(runId, "execute", "execute_tasks", "success", `${outputs.length} task outputs applied`, ["outputs.json", "execution.json"], Date.now() - executeStarted);
 
         await this.store.updatePhase(runId, "verify");
         const verifyStarted = Date.now();
-        qa = await executor.verify(goal, plan, outputs);
+        qa = await executor.verify(goal, plan, outputs, intake);
         await this.store.writeArtifact(runId, "qa.json", qa);
         await this.event(runId, "verify", "verify", qa.passed ? "success" : "warning", `QA passed=${qa.passed} score=${qa.score}`, ["qa.json"], Date.now() - verifyStarted);
 

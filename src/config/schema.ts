@@ -63,6 +63,25 @@ export const approvalConfigSchema = z.object({
   ])
 }).default({});
 
+const verificationPresetsSchema = z.object({
+  default: z.array(z.string()).default([]),
+  byTaskType: z.record(z.array(z.string())).default({
+    lint: ["npm run --if-present lint"],
+    build: ["npm run --if-present build"],
+    test: ["npm run --if-present test"],
+    browser: ["npm run --if-present test"],
+    api: ["npm run --if-present test"],
+    database: ["npm run --if-present test"],
+    security: ["npm run --if-present audit"],
+    performance: ["npm run --if-present build"]
+  }),
+  byRisk: z.object({
+    low: z.array(z.string()).default([]),
+    medium: z.array(z.string()).default(["npm run --if-present test"]),
+    high: z.array(z.string()).default(["npm run --if-present test", "npm run --if-present build"])
+  }).default({})
+}).default({});
+
 export const governanceConfigSchema = z.object({
   requireGitRepo: z.boolean().default(false),
   dirtyWorktree: governanceModeSchema.default("warn"),
@@ -107,7 +126,8 @@ export const openMythosConfigSchema = z.object({
   }).default({}),
   verification: z.object({
     localCommands: z.array(z.string()).default([]),
-    requireLocalPassBeforeModelQa: z.boolean().default(true)
+    requireLocalPassBeforeModelQa: z.boolean().default(true),
+    presets: verificationPresetsSchema
   }).default({}),
   approval: approvalConfigSchema,
   governance: governanceConfigSchema

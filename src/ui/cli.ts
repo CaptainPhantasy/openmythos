@@ -73,6 +73,82 @@ export function buildCli(): Command {
       }
     });
 
+  program.command("approve")
+    .description("Approve an awaiting_approval run and continue execution")
+    .argument("<runId>", "Run id")
+    .option("-c, --config <path>", "Config file", "openmythos.config.json")
+    .option("-p, --profile <nameOrPath>", "Config profile overlay")
+    .option("-w, --workdir <path>", "Target working directory", ".")
+    .action(async (runId: string, options: { config: string; profile?: string; workdir: string }) => {
+      const { runner } = await runtime(options.config, options.workdir, options.profile);
+      const result = await runner.approve(runId);
+      console.log(JSON.stringify(result, null, 2));
+      if (result.status !== "completed" && result.status !== "awaiting_approval") {
+        process.exitCode = 1;
+      }
+    });
+
+  program.command("reject")
+    .description("Reject a run and fail it")
+    .argument("<runId>", "Run id")
+    .argument("[reason...]", "Reason for rejection")
+    .option("-c, --config <path>", "Config file", "openmythos.config.json")
+    .option("-p, --profile <nameOrPath>", "Config profile overlay")
+    .option("-w, --workdir <path>", "Target working directory", ".")
+    .action(async (runId: string, reasonParts: string[], options: { config: string; profile?: string; workdir: string }) => {
+      const { runner } = await runtime(options.config, options.workdir, options.profile);
+      const reason = reasonParts.length > 0 ? reasonParts.join(" ") : "Rejected by operator.";
+      const result = await runner.reject(runId, reason);
+      console.log(JSON.stringify(result, null, 2));
+      if (result.status !== "failed") {
+        process.exitCode = 1;
+      }
+    });
+
+  program.command("cancel")
+    .description("Cancel a run and mark it as failed")
+    .argument("<runId>", "Run id")
+    .argument("[reason...]", "Optional reason for cancellation")
+    .option("-c, --config <path>", "Config file", "openmythos.config.json")
+    .option("-p, --profile <nameOrPath>", "Config profile overlay")
+    .option("-w, --workdir <path>", "Target working directory", ".")
+    .action(async (runId: string, reasonParts: string[], options: { config: string; profile?: string; workdir: string }) => {
+      const { runner } = await runtime(options.config, options.workdir, options.profile);
+      const reason = reasonParts.length > 0 ? reasonParts.join(" ") : "Cancelled by operator.";
+      const result = await runner.cancel(runId, reason);
+      console.log(JSON.stringify(result, null, 2));
+      if (result.status !== "failed") {
+        process.exitCode = 1;
+      }
+    });
+
+  program.command("queue")
+    .description("Queue a run for replay from the beginning")
+    .argument("<runId>", "Run id")
+    .option("-c, --config <path>", "Config file", "openmythos.config.json")
+    .option("-p, --profile <nameOrPath>", "Config profile overlay")
+    .option("-w, --workdir <path>", "Target working directory", ".")
+    .action(async (runId: string, options: { config: string; profile?: string; workdir: string }) => {
+      const { runner } = await runtime(options.config, options.workdir, options.profile);
+      const result = await runner.queue(runId);
+      console.log(JSON.stringify(result, null, 2));
+    });
+
+  program.command("replay")
+    .description("Queue and rerun a run from the beginning")
+    .argument("<runId>", "Run id")
+    .option("-c, --config <path>", "Config file", "openmythos.config.json")
+    .option("-p, --profile <nameOrPath>", "Config profile overlay")
+    .option("-w, --workdir <path>", "Target working directory", ".")
+    .action(async (runId: string, options: { config: string; profile?: string; workdir: string }) => {
+      const { runner } = await runtime(options.config, options.workdir, options.profile);
+      const result = await runner.replay(runId);
+      console.log(JSON.stringify(result, null, 2));
+      if (result.status !== "completed" && result.status !== "awaiting_approval") {
+        process.exitCode = 1;
+      }
+    });
+
   program.command("resume")
     .argument("<runId>", "Run id")
     .option("-c, --config <path>", "Config file", "openmythos.config.json")

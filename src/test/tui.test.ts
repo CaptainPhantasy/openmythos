@@ -3,11 +3,12 @@ import test from "node:test";
 import { renderDashboard } from "../ui/tui.js";
 
 test("renderDashboard displays run and recent event state", () => {
-  const output = renderDashboard({
-    runs: [{
+    const output = renderDashboard({
+      runs: [{
       runId: "run-1",
       goal: "test goal",
       status: "completed",
+      approved: false,
       currentPhase: "complete",
       phasesCompleted: ["intake", "context", "plan", "execute", "verify", "complete"],
       retryCount: 0,
@@ -21,6 +22,7 @@ test("renderDashboard displays run and recent event state", () => {
       runId: "run-1",
       goal: "test goal",
       status: "completed",
+      approved: false,
       currentPhase: "complete",
       phasesCompleted: ["intake", "context", "plan", "execute", "verify", "complete"],
       retryCount: 0,

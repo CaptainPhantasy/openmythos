@@ -106,8 +106,30 @@ async function detectFakeSurface(repoRoot: string): Promise<FakeSurfaceReport> {
 async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalSummary[]): Promise<ProductGoalAssessment[]> {
   const types = await readOptional(resolve(repoRoot, "src/core/types.ts"));
   const cliSource = await readOptional(resolve(repoRoot, "src/ui/cli.ts"));
+  const phasesSource = await readOptional(resolve(repoRoot, "src/core/phases.ts"));
+  const tuiSource = await readOptional(resolve(repoRoot, "src/ui/tui.ts"));
   const hasSessionCommand = cliSource.includes('program.command("session")');
   const hasSetupCommand = cliSource.includes('program.command("setup")');
+  const hasWorkflowControlCommands = [
+    'program.command("approve")',
+    'program.command("reject")',
+    'program.command("cancel")',
+    'program.command("queue")',
+    'program.command("replay")'
+  ].every((command) => cliSource.includes(command));
+  const hasTuiControls = [
+    'key.name === "a"',
+    'key.name === "x"',
+    'key.name === "c"',
+    'key.name === "p"',
+    'key.name === "l"'
+  ].every((snippet) => tuiSource.includes(snippet));
+  const hasVerificationPresetResolution = [
+    "resolveTaskVerificationCommands",
+    "resolveVerificationCommandSet",
+    "matchTaskTypePresets"
+  ].every((snippet) => phasesSource.includes(snippet));
+  const hasVerificationPresetConfig = (await readOptional(resolve(repoRoot, "openmythos.config.json"))).includes('"presets"');
   const commandEvidence = evidence(
     "cli.commands",
     "real",
@@ -116,7 +138,51 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
     []
   );
   const tuiInspectionEvidence = evidence("tui.inspect", "real", "TUI renders run lists, metrics, artifacts, and recent events.", ["src/ui/tui.ts"], []);
-  const missingTuiControls = evidence("tui.controls.missing", "missing", "TUI does not expose approval, reject, cancel, queue, or replay actions.", ["src/ui/tui.ts"], ["Add execution-native TUI controls for approval, cancellation, queueing, retry, and replay."]);
+  const workflowControlEvidence = hasWorkflowControlCommands
+    ? evidence(
+      "cli.workflow.controls",
+      "real",
+      "CLI exposes approve, reject, cancel, queue, and replay controls for run execution orchestration.",
+      ["src/ui/cli.ts"],
+      []
+    )
+    : evidence(
+      "cli.workflow.controls.missing",
+      "missing",
+      "Workflow control CLI commands for approve, reject, cancel, queue, and replay are not all present.",
+      ["src/ui/cli.ts"],
+      ["Add CLI controls for approve/reject/cancel/queue/replay to complete manual run control."]
+    );
+  const tuiControlEvidence = hasTuiControls
+    ? evidence(
+      "tui.controls",
+      "real",
+      "TUI binds approval, reject, cancel, queue, and replay hotkeys for selected runs.",
+      ["src/ui/tui.ts"],
+      []
+    )
+    : evidence(
+      "tui.controls.missing",
+      "missing",
+      "TUI does not expose approval, reject, cancel, queue, or replay actions.",
+      ["src/ui/tui.ts"],
+      ["Add execution-native TUI controls for approval, cancellation, queueing, and replay."]
+    );
+  const verificationPresetEvidence = hasVerificationPresetConfig && hasVerificationPresetResolution
+    ? evidence(
+      "verification.presets",
+      "real",
+      "Task verification resolves task-class, risk, and explicit presets from first-class configuration.",
+      ["src/core/phases.ts", "openmythos.config.json"],
+      []
+    )
+    : evidence(
+      "verification.presets.missing",
+      "missing",
+      "No first-class verification presets for lint/build/test/browser/API/security/performance task classes exist.",
+      ["src/core/phases.ts", "openmythos.config.json"],
+      ["Add policy-backed verification presets by task class and risk."]
+    );
 
   const taskTools = extractToolUnion(types);
   const expectedTaskTools = ["shell.run", "package.install", "git.branch", "git.stage", "git.commit", "browser.verify", "api.request", "database.query"];
@@ -165,11 +231,12 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
       "OpenMythos Is A Complete Daily Work Surface",
       [
         commandEvidence,
-        tuiInspectionEvidence
+        tuiInspectionEvidence,
+        workflowControlEvidence,
+        tuiControlEvidence
       ],
       [],
       [
-        missingTuiControls,
         ...(hasSessionCommand
           ? []
           : [evidence("session.loop.missing", "missing", "No interactive session command exists for daily repo work.", ["src/ui/cli.ts"], ["Add a daily-driver session entrypoint that can control active work, not only launch runs."])])
@@ -194,12 +261,11 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
       "OpenMythos Is A Complete Verification And Safety System",
       [
         evidence("governance.review", "real", "Governance preflight, risk review, approval stops, and task verification receipts exist.", ["src/core/governance.ts", "src/core/review.ts", "src/core/phases.ts"], []),
-        evidence("local.verification", "real", "Local and task-level verification commands gate runs before model QA.", ["src/core/phases.ts"], [])
+        evidence("local.verification", "real", "Local and task-level verification commands gate runs before model QA.", ["src/core/phases.ts"], []),
+        verificationPresetEvidence
       ],
       [],
-      [
-        evidence("verification.presets.missing", "missing", "No first-class verification presets for lint/build/test/browser/API/security/performance task classes exist.", ["src/core/phases.ts", "openmythos.config.json"], ["Add policy-backed verification presets by task class and risk."])
-      ]
+      []
     ),
     goal(
       "repo-workflow",

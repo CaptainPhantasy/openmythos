@@ -129,7 +129,48 @@
     "localCommands": [
       "npm run build"
     ],
-    "requireLocalPassBeforeModelQa": true
+    "requireLocalPassBeforeModelQa": true,
+    "presets": {
+      "default": [
+        "npm run build"
+      ],
+      "byTaskType": {
+        "lint": [
+          "npm run --if-present lint"
+        ],
+        "build": [
+          "npm run --if-present build"
+        ],
+        "test": [
+          "npm run --if-present test"
+        ],
+        "browser": [
+          "npm run --if-present test"
+        ],
+        "api": [
+          "npm run --if-present test"
+        ],
+        "database": [
+          "npm run --if-present test"
+        ],
+        "security": [
+          "npm run --if-present audit"
+        ],
+        "performance": [
+          "npm run --if-present build"
+        ]
+      },
+      "byRisk": {
+        "low": [],
+        "medium": [
+          "npm run --if-present test"
+        ],
+        "high": [
+          "npm run --if-present test",
+          "npm run --if-present build"
+        ]
+      }
+    }
   },
   "approval": {
     "mode": "suggest",

@@ -4,6 +4,7 @@ export interface RunState {
   runId: string;
   goal: string;
   status: "running" | "awaiting_approval" | "completed" | "failed";
+  approved: boolean;
   currentPhase: Phase;
   phasesCompleted: Phase[];
   retryCount: number;

@@ -30,6 +30,24 @@
       "test -f openmythos-fake-output.txt",
       "grep -q OPENMYTHOS_FAKE_SUCCESS openmythos-fake-output.txt"
     ],
-    "requireLocalPassBeforeModelQa": true
+    "requireLocalPassBeforeModelQa": true,
+    "presets": {
+      "default": [],
+      "byTaskType": {
+        "lint": [],
+        "build": [],
+        "test": [],
+        "browser": [],
+        "api": [],
+        "database": [],
+        "security": [],
+        "performance": []
+      },
+      "byRisk": {
+        "low": [],
+        "medium": [],
+        "high": []
+      }
+    }
   }
 }
