@@ -105,6 +105,9 @@ async function detectFakeSurface(repoRoot: string): Promise<FakeSurfaceReport> {
 
 async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalSummary[]): Promise<ProductGoalAssessment[]> {
   const types = await readOptional(resolve(repoRoot, "src/core/types.ts"));
+  const cliSource = await readOptional(resolve(repoRoot, "src/ui/cli.ts"));
+  const hasSessionCommand = cliSource.includes('program.command("session")');
+  const hasSetupCommand = cliSource.includes('program.command("setup")');
   const commandEvidence = evidence(
     "cli.commands",
     "real",
@@ -116,7 +119,8 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
   const missingTuiControls = evidence("tui.controls.missing", "missing", "TUI does not expose approval, reject, cancel, queue, or replay actions.", ["src/ui/tui.ts"], ["Add execution-native TUI controls for approval, cancellation, queueing, retry, and replay."]);
 
   const taskTools = extractToolUnion(types);
-  const missingTaskTools = ["shell.run", "package.install", "git.branch", "git.stage", "git.commit", "browser.verify", "api.request", "database.query"]
+  const expectedTaskTools = ["shell.run", "package.install", "git.branch", "git.stage", "git.commit", "browser.verify", "api.request", "database.query"];
+  const missingTaskTools = expectedTaskTools
     .filter((tool) => !taskTools.includes(tool));
 
   const liveGate = strongestSmokeGate(liveEvalSummaries);
@@ -166,7 +170,9 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
       [],
       [
         missingTuiControls,
-        evidence("session.loop.missing", "missing", "No interactive session command exists for daily repo work.", ["src/ui/cli.ts"], ["Add a daily-driver session entrypoint that can control active work, not only launch runs."])
+        ...(hasSessionCommand
+          ? []
+          : [evidence("session.loop.missing", "missing", "No interactive session command exists for daily repo work.", ["src/ui/cli.ts"], ["Add a daily-driver session entrypoint that can control active work, not only launch runs."])])
       ]
     ),
     goal(
@@ -177,9 +183,11 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
         evidence("dependency.batching", "real", "Execution batches dependency-free tasks and scopes downstream handoff context.", ["src/core/phases.ts"], [])
       ],
       [],
-      [
-        evidence("task.tools.missing", "missing", `Worker-requestable task tools are incomplete. Missing: ${missingTaskTools.join(", ")}.`, ["src/core/types.ts"], ["Expand TaskToolRequest and execution dispatch for shell, package, git write, browser, API, and database actions."])
-      ]
+      missingTaskTools.length > 0
+        ? [
+          evidence("task.tools.missing", "missing", `Worker-requestable task tools are incomplete. Missing: ${missingTaskTools.join(", ")}.`, ["src/core/types.ts"], ["Expand TaskToolRequest and execution dispatch for shell, package, git write, browser, API, and database actions."])
+        ]
+        : []
     ),
     goal(
       "verification-safety",
@@ -204,15 +212,21 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
         evidence("git.write.workflow.missing", "missing", "No branch creation, staging, commit preparation, rollback, or PR publication workflow exists.", ["src/ui/cli.ts", "src/core"], ["Add repo lifecycle commands and harness tool actions for branch, stage, commit, rollback, and PR review publication."])
       ]
     ),
-    goal(
+      goal(
       "comfortable-adoption",
       "OpenMythos Is Comfortable To Adopt",
       [
         evidence("readme.usage", "real", "README documents installation, profiles, usage, review, issue, PR, TUI, and benchmark commands.", ["README.md"], [])
+        ,
+        ...(hasSetupCommand
+          ? [evidence("onboarding.setup", "real", "Setup command validates config, profile, workspace, and key availability for first run.", ["src/ui/cli.ts", "src/core/setup.ts"], [])]
+          : [])
       ],
       [],
       [
-        evidence("onboarding.missing", "missing", "No first-run onboarding, setup validation, or recommended-defaults command exists.", ["README.md", "src/ui/cli.ts"], ["Add setup/onboarding validation for keys, profiles, shell invocation, and workspace binding."])
+        ...(hasSetupCommand
+          ? []
+          : [evidence("onboarding.missing", "missing", "No first-run onboarding, setup validation, or recommended-defaults command exists.", ["README.md", "src/ui/cli.ts"], ["Add setup/onboarding validation for keys, profiles, shell invocation, and workspace binding."])])
       ]
     ),
     goal(
@@ -357,7 +371,11 @@ async function findFiles(root: string, targetName: string, maxDepth: number, dep
 }
 
 function extractToolUnion(typesSource: string): string[] {
-  const match = typesSource.match(/tool:\s*([^;]+);/);
+  const taskToolRequestStart = typesSource.indexOf("export interface TaskToolRequest");
+  if (taskToolRequestStart < 0) {
+    return [];
+  }
+  const match = typesSource.slice(taskToolRequestStart).match(/tool:\s*([^;]+);/);
   if (!match?.[1]) {
     return [];
   }

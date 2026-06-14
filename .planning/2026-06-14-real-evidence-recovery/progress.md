@@ -63,6 +63,24 @@
 - Added: `src/test/readiness.test.ts`
 - Evidence: explicit shape guard now prevents raw `LiveEvalSummary` objects from entering `outcome-superiority.realEvidence` in tests.
 
+### Phase 4: Expand Real Worker Actions
+
+- **Status:** in progress
+- **Started:** 2026-06-14
+- Actions taken:
+  - Added a dedicated onboarding/setup check command with first-run validation for config, profile overlay, workspace, and API key presence.
+  - Added a `session` command that executes repo goals from a daily-driver entrypoint and optionally hands off to TUI.
+  - Updated readiness to treat onboarding and session entrypoints as real evidence when present.
+  - Added readiness coverage for setup/session command presence.
+- Files created/modified:
+  - `src/core/setup.ts`
+  - `src/core/readiness.ts`
+  - `src/ui/cli.ts`
+  - `src/test/readiness.test.ts`
+  - `README.md`
+  - `.planning/2026-06-14-real-evidence-recovery/task_plan.md`
+  - `.planning/2026-06-14-real-evidence-recovery/progress.md`
+
 ## Test Results
 
 | Test | Input | Expected | Actual | Status |

@@ -41,6 +41,7 @@ Phase 4
 - [ ] Add or wire real task-loop actions for shell, package manager, git write, browser/UI verification, API, and database flows where appropriate.
 - [ ] Gate risky actions through explicit policy and retained receipts.
 - [ ] Verify those actions against real fixture tasks before claiming parity.
+- [ ] Add first-run onboarding validation and a dedicated daily session entrypoint with real setup checks.
 - **Status:** pending
 
 ### Phase 5: Product Readiness Promotion Gate

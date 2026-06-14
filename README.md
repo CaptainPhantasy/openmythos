@@ -111,6 +111,18 @@ If you prefer not to link globally, use:
 npm exec openmythos tui
 ```
 
+Before the first run, validate configuration and workspace state:
+
+```bash
+npm run cli -- setup --workdir . --json
+```
+
+Run a daily-driver session (wrapper around run with immediate execution output and optional TUI handoff):
+
+```bash
+npm run cli -- session "your day-to-day goal" --tui
+```
+
 Run with a profile:
 
 ```bash

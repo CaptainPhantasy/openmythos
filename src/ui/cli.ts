@@ -20,6 +20,7 @@ import {
   type RealEvalModelBinding,
   type RealEvalResult
 } from "../core/real-eval.js";
+import { runSetupCheck } from "../core/setup.js";
 import { runReview } from "../core/reviewer.js";
 import { Runner } from "../core/runner.js";
 import { StateStore } from "../state/store.js";
@@ -43,6 +44,33 @@ export function buildCli(): Command {
       const { runner } = await runtime(options.config, options.workdir, options.profile);
       const result = await runner.run(goal);
       console.log(JSON.stringify(result, null, 2));
+    });
+
+  program.command("session")
+    .argument("<goal>", "Goal to execute in daily-driver mode")
+    .option("-c, --config <path>", "Config file", "openmythos.config.json")
+    .option("-p, --profile <nameOrPath>", "Config profile overlay")
+    .option("-w, --workdir <path>", "Target working directory", ".")
+    .option("--tui", "Open the TUI after the run starts")
+    .action(async (
+      goal: string,
+      options: {
+        config: string;
+        profile?: string;
+        workdir: string;
+        tui?: boolean;
+      }
+    ) => {
+      const { runner, store } = await runtime(options.config, options.workdir, options.profile);
+      const result = await runner.run(goal);
+      console.log(JSON.stringify(result, null, 2));
+
+      if (options.tui) {
+        await runTui(store, false);
+      }
+      if (result.status !== "completed" && result.status !== "awaiting_approval") {
+        process.exitCode = 1;
+      }
     });
 
   program.command("resume")
@@ -334,6 +362,42 @@ export function buildCli(): Command {
       const report = await buildReadinessReport(resolve(options.workdir));
       console.log(JSON.stringify(report, null, 2));
       if (report.summary.unprovenCount > 0 || report.summary.missingEvidenceCount > 0) {
+        process.exitCode = 1;
+      }
+    });
+
+  program.command("setup")
+    .description("Validate configuration, profile, and workspace for first-run onboarding.")
+    .option("-c, --config <path>", "Config file", "openmythos.config.json")
+    .option("-p, --profile <nameOrPath>", "Config profile overlay")
+    .option("-w, --workdir <path>", "Target working directory", ".")
+    .option("--json", "Output machine-readable report")
+    .action(async (options: { config: string; profile?: string; workdir: string; json?: boolean }) => {
+      const report = await runSetupCheck({
+        configPath: options.config,
+        workdir: options.workdir,
+        profileName: options.profile
+      });
+      if (options.json) {
+        console.log(JSON.stringify(report, null, 2));
+      } else {
+        for (const item of report.errors) {
+          console.log(`ERROR [${item.id}] ${item.summary}`);
+          console.log(`  ${item.detail}`);
+        }
+        for (const item of report.warnings) {
+          console.log(`WARN [${item.id}] ${item.summary}`);
+          console.log(`  ${item.detail}`);
+        }
+        if (report.recommendations.length > 0) {
+          console.log("RECOMMENDATIONS:");
+          for (const recommendation of report.recommendations) {
+            console.log(`- ${recommendation}`);
+          }
+        }
+        console.log(`Setup status: ${report.passed ? "PASS" : "FAIL"}`);
+      }
+      if (!report.passed) {
         process.exitCode = 1;
       }
     });
