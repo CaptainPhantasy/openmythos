@@ -122,13 +122,10 @@ export class PhaseExecutor {
     const outputs: TaskOutput[] = [];
     this.taskReceipts = [];
     const batches = buildExecutionBatches(plan.tasks, plan.dependencies);
-    const snippets = Object.entries(context.relevantSnippets)
-      .map(([path, content]) => `=== ${path} ===\n${content}`)
-      .join("\n\n");
 
     for (const batch of batches) {
       const batchOutputs = await Promise.all(batch.map(async (task) => {
-        const execution = await this.executeTask(task, plan, snippets, outputs);
+        const execution = await this.executeTask(task, plan, context, outputs);
         const review = await createReviewBundle(
           this.workdir,
           this.runDir,
@@ -296,7 +293,7 @@ export class PhaseExecutor {
   private async executeTask(
     task: PlanTask,
     plan: Plan,
-    snippets: string,
+    context: ContextResult,
     priorOutputs: TaskOutput[]
   ): Promise<{
     output: TaskOutput;
@@ -324,6 +321,17 @@ export class PhaseExecutor {
       taskContextArtifacts.push(artifactPath);
     }
 
+    const taskSnippets = this.buildTaskSnippetContext(task, context, dependencyContext);
+    if (Object.keys(taskSnippets).length > 0) {
+      const artifactPath = resolve(this.runDir, `task-snippets-${task.id}.json`);
+      await writeFile(
+        artifactPath,
+        JSON.stringify({ taskId: task.id, snippets: taskSnippets }, null, 2),
+        "utf-8"
+      );
+      taskContextArtifacts.push(artifactPath);
+    }
+
     const taskContextObservations = await this.collectModelTaskContext(task);
     if (taskContextObservations.length > 0) {
       const artifactPath = resolve(this.runDir, `task-context-${task.id}.json`);
@@ -335,7 +343,7 @@ export class PhaseExecutor {
       taskContextArtifacts.push(artifactPath);
     }
 
-    const loopResult = await this.executeModelTaskLoop(task, plan, snippets, dependencyContext, taskContextObservations);
+    const loopResult = await this.executeModelTaskLoop(task, plan, taskSnippets, dependencyContext, taskContextObservations);
     if (loopResult.artifactPath) {
       taskContextArtifacts.push(loopResult.artifactPath);
     }
@@ -586,7 +594,7 @@ export class PhaseExecutor {
   private async executeModelTaskLoop(
     task: PlanTask,
     plan: Plan,
-    snippets: string,
+    taskSnippets: Record<string, string>,
     dependencyContext: { dependencyIds: string[]; outputs: TaskOutput[]; receipts: TaskExecutionReceipt[] },
     taskContextObservations: TaskObservation[]
   ): Promise<{
@@ -599,6 +607,9 @@ export class PhaseExecutor {
     const role = task.role;
     const model = this.config.models[role];
     const currentFileState = await this.readCurrentFileState(task);
+    const snippets = Object.entries(taskSnippets)
+      .map(([path, content]) => `=== ${path} ===\n${content}`)
+      .join("\n\n");
     const messages: AdapterMessage[] = [{
       role: "user",
       content: `Task:\n${JSON.stringify(task, null, 2)}\n\nSuccess criteria:\n${plan.successCriteria.map((criterion) => `- ${criterion}`).join("\n")}\n\nRelevant snippets:\n${snippets}\n\nDeclared dependency ids:\n${JSON.stringify(dependencyContext.dependencyIds, null, 2)}\n\nDependency outputs:\n${JSON.stringify(dependencyContext.outputs, null, 2)}\n\nDependency execution receipts:\n${JSON.stringify(dependencyContext.receipts, null, 2)}\n\nTask tool context:\n${JSON.stringify(taskContextObservations, null, 2)}\n\nCurrent file state:\n${JSON.stringify(currentFileState, null, 2)}`
@@ -710,6 +721,64 @@ export class PhaseExecutor {
         .map((dependencyId) => receiptsById.get(dependencyId))
         .filter((receipt): receipt is TaskExecutionReceipt => Boolean(receipt))
     };
+  }
+
+  private buildTaskSnippetContext(
+    task: PlanTask,
+    context: ContextResult,
+    dependencyContext: { dependencyIds: string[]; outputs: TaskOutput[]; receipts: TaskExecutionReceipt[] }
+  ): Record<string, string> {
+    const snippetEntries = Object.entries(context.relevantSnippets);
+    if (snippetEntries.length === 0) {
+      return {};
+    }
+
+    const queryTerms = this.extractTaskQueryTerms(task);
+    const dependencyTargets = new Set(
+      dependencyContext.outputs
+        .flatMap((output) => output.fileEdits.map((edit) => edit.path.toLowerCase()))
+    );
+    const selected = snippetEntries.filter(([path, content]) => {
+      const lowerPath = path.toLowerCase();
+      if (task.fileTargets.some((target) => target.toLowerCase() === lowerPath)) {
+        return true;
+      }
+      if (dependencyTargets.has(lowerPath)) {
+        return true;
+      }
+      if (queryTerms.length === 0) {
+        return false;
+      }
+      const haystack = `${path}\n${content}`.toLowerCase();
+      return queryTerms.some((term) => haystack.includes(term));
+    });
+
+    if (selected.length > 0) {
+      return Object.fromEntries(selected);
+    }
+
+    const fallbacks = snippetEntries.filter(([path]) =>
+      task.fileTargets.some((target) => target.toLowerCase() === path.toLowerCase())
+    );
+    return Object.fromEntries(fallbacks);
+  }
+
+  private extractTaskQueryTerms(task: PlanTask): string[] {
+    const contextTerms = task.contextQueries
+      .map((query) => query.trim().toLowerCase())
+      .filter((query) => query.length >= 3);
+
+    if (contextTerms.length > 0) {
+      return [...new Set(contextTerms)];
+    }
+
+    return [...new Set(
+      [...task.fileTargets, task.title]
+        .join("\n")
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter((term) => term.length >= 3)
+    )];
   }
 
   private async executeModelToolRequests(task: PlanTask, requests: TaskToolRequest[]): Promise<TaskObservation[]> {

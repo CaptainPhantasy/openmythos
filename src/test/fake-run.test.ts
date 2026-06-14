@@ -322,3 +322,30 @@ test("Runner passes only declared dependency handoff context to downstream model
   );
   assert.ok(execution[2]?.artifacts.some((artifact) => artifact.endsWith("task-dependencies-task-3.json")));
 });
+
+test("Runner scopes compressed repository snippets to the current task", async () => {
+  const workdir = await mkdtemp(join(tmpdir(), "openmythos-fake-task-snippets-"));
+  await mkdir(resolve(workdir, "src"), { recursive: true });
+  await writeFile(resolve(workdir, "src", "alpha.ts"), "export const alpha = 'ALPHA_ONLY';\n", "utf8");
+  await writeFile(resolve(workdir, "src", "beta.ts"), "export const beta = 'BETA_ONLY';\n", "utf8");
+
+  const config = await loadConfigWithOptionalProfile(resolve("openmythos.config.json"), "fake");
+  config.verification.localCommands = [];
+  const runner = new Runner(config, new StateStore(resolve(workdir, "runs")), workdir);
+
+  const result = await runner.run("task snippet scoping");
+  const execution = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "execution.json"), "utf8")) as Array<{
+    taskId: string;
+    status: string;
+    artifacts: string[];
+  }>;
+  const report = await readFile(resolve(workdir, "alpha-report.txt"), "utf8");
+
+  assert.equal(result.status, "completed");
+  assert.equal(report, "TASK_SNIPPET_SCOPE_OK\n");
+  assert.deepEqual(
+    execution.map((receipt) => [receipt.taskId, receipt.status]),
+    [["task-1", "success"]]
+  );
+  assert.ok(execution[0]?.artifacts.some((artifact) => artifact.endsWith("task-snippets-task-1.json")));
+});

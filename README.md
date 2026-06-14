@@ -234,6 +234,9 @@ Each run writes an inspectable artifact set:
   for model-executed tasks that request deterministic search or symbol context.
 - `task-dependencies-*.json`: dependency-scoped handoff payloads retained for
   downstream model tasks, including only declared upstream outputs and receipts.
+- `task-snippets-*.json`: per-task repository snippet packs retained for model
+  tasks so execution context can be inspected separately from the broader run
+  context.
 - `task-tool-turns-*.json`: bounded model-tool loop history for tasks that
   requested additional harness evidence before producing a final result.
 - `task-observation-*.json`: structured read-only evidence captured by
@@ -281,6 +284,9 @@ Plan task contract:
 - dependent model tasks now receive only their declared upstream outputs and
   execution receipts, instead of the full prior-output history from unrelated
   tasks
+- model tasks now receive repository snippets scoped to their own file targets,
+  context queries, and declared dependency artifacts instead of the full
+  compressed snippet pack for the run
 - planners can set `executor = "harness"` for read-only verifier work so the
   harness can execute deterministic verification tasks without a model call
 - harness-executed verifier tasks must declare a typed `harnessAction`, and the

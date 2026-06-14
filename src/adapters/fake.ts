@@ -16,6 +16,19 @@ export class FakeAdapter implements ModelAdapter {
 
   private responseFor(request: AdapterRequest): Record<string, unknown> {
     if (request.system.includes("classify software work")) {
+      const taskSnippetScoping = request.messages.some((message) => message.content.includes("task snippet scoping"));
+      if (taskSnippetScoping) {
+        return {
+          taskType: "feature",
+          description: "Create a report using only ALPHA_ONLY repository context.",
+          successCriteria: [
+            "alpha-report.txt exists",
+            "alpha-report.txt contains TASK_SNIPPET_SCOPE_OK"
+          ],
+          complexity: "low",
+          relevantPatterns: ["src/**/*.ts"]
+        };
+      }
       return {
         taskType: "feature",
         description: "Create a deterministic fake-run output file.",
@@ -29,6 +42,20 @@ export class FakeAdapter implements ModelAdapter {
     }
 
     if (request.system.includes("compress repository context")) {
+      const taskSnippetScoping = request.messages.some((message) =>
+        message.content.includes("task snippet scoping") || message.content.includes("ALPHA_ONLY")
+      );
+      if (taskSnippetScoping) {
+        return {
+          fileManifest: ["src/alpha.ts", "src/beta.ts"],
+          summary: "Repository context includes alpha and beta source files.",
+          relevantSnippets: {
+            "src/alpha.ts": "export const alpha = 'ALPHA_ONLY';",
+            "src/beta.ts": "export const beta = 'BETA_ONLY';"
+          },
+          tokenEstimate: 32
+        };
+      }
       return {
         fileManifest: [],
         summary: "No project context is required for the deterministic fake run.",
@@ -47,11 +74,17 @@ export class FakeAdapter implements ModelAdapter {
       const modelToolLoop = request.messages.some((message) => message.content.includes("model tool loop"));
       const modelVerificationCommandLoop = request.messages.some((message) => message.content.includes("model verification command loop"));
       const dependencyScopedHandoff = request.messages.some((message) => message.content.includes("dependency scoped handoff"));
+      const taskSnippetScoping = request.messages.some((message) => message.content.includes("task snippet scoping"));
       const successCriteria = dependencyScopedHandoff
         ? [
             "handoff-report.txt exists",
             "handoff-report.txt contains DEPENDENCY_HANDOFF_OK"
           ]
+        : taskSnippetScoping
+          ? [
+              "alpha-report.txt exists",
+              "alpha-report.txt contains TASK_SNIPPET_SCOPE_OK"
+            ]
         : harnessStatusAction
         ? [
             "Git status context is captured",
@@ -101,6 +134,23 @@ export class FakeAdapter implements ModelAdapter {
                   "The file exists",
                   "The file contains OPENMYTHOS_FAKE_SUCCESS"
                 ]
+              }
+            ]
+          : taskSnippetScoping
+          ? [
+              {
+                id: "task-1",
+                title: "Create alpha-only report",
+                description: "Use only ALPHA_ONLY repository snippet context to create the report.",
+                role: "coder",
+                executor: "model",
+                harnessAction: null,
+                contextQueries: ["ALPHA_ONLY"],
+                fileTargets: ["src/alpha.ts", "alpha-report.txt"],
+                requiredTools: ["filesystem.write"],
+                verificationCommands: ["test -f alpha-report.txt", "grep -qx 'TASK_SNIPPET_SCOPE_OK' alpha-report.txt"],
+                executionMode: "serial",
+                acceptanceCriteria: ["alpha-report.txt exists", "alpha-report.txt contains TASK_SNIPPET_SCOPE_OK"]
               }
             ]
           : dependencyScopedHandoff
@@ -276,6 +326,7 @@ export class FakeAdapter implements ModelAdapter {
       const modelToolLoop = request.messages.some((message) => message.content.includes("Create fake output marker through model tool loop"));
       const modelVerificationCommandLoop = request.messages.some((message) => message.content.includes("Create fake output marker after command-backed verification"));
       const dependencyHandoffReport = request.messages.some((message) => message.content.includes("Create dependency handoff report"));
+      const taskSnippetScoping = request.messages.some((message) => message.content.includes("Create alpha-only report"));
       const hasToolResults = request.messages.some((message) => message.content.includes("Tool results for the previous request:"));
       const taskId = request.messages.some((message) => message.content.includes('"id": "task-3"'))
         ? "task-3"
@@ -304,6 +355,31 @@ export class FakeAdapter implements ModelAdapter {
             ? "Dependency-scoped handoff was limited to the declared upstream task."
             : "Dependency-scoped handoff included unrelated task data.",
           errors: dependencyOnlyAlpha && !leaksBeta ? [] : ["Dependency context was not scoped to the declared upstream tasks."],
+          toolRequests: []
+        };
+      }
+      if (taskSnippetScoping) {
+        const hasAlphaSnippet = request.messages.some((message) =>
+          message.content.includes("src/alpha.ts") && message.content.includes("ALPHA_ONLY")
+        );
+        const leaksBetaSnippet = request.messages.some((message) =>
+          message.content.includes("src/beta.ts") || message.content.includes("BETA_ONLY")
+        );
+        return {
+          taskId,
+          status: hasAlphaSnippet && !leaksBetaSnippet ? "success" : "failed",
+          fileEdits: hasAlphaSnippet && !leaksBetaSnippet
+            ? [{
+                path: "alpha-report.txt",
+                action: "create",
+                content: "TASK_SNIPPET_SCOPE_OK\n",
+                description: "Record that task-specific snippet scoping was correct"
+              }]
+            : [],
+          summary: hasAlphaSnippet && !leaksBetaSnippet
+            ? "Task-specific snippet context was limited to the relevant alpha file."
+            : "Task-specific snippet context leaked unrelated repository snippets.",
+          errors: hasAlphaSnippet && !leaksBetaSnippet ? [] : ["Task-specific snippet selection included unrelated repository context."],
           toolRequests: []
         };
       }
@@ -387,6 +463,7 @@ export class FakeAdapter implements ModelAdapter {
     if (request.system.includes("final QA gate")) {
       const harnessStatusAction = request.messages.some((message) => message.content.includes("Inspect git status via harness action"));
       const dependencyScopedHandoff = request.messages.some((message) => message.content.includes("Create dependency handoff report"));
+      const taskSnippetScoping = request.messages.some((message) => message.content.includes("Create alpha-only report"));
       return {
         passed: true,
         score: 100,
@@ -397,6 +474,11 @@ export class FakeAdapter implements ModelAdapter {
               "handoff-report.txt exists",
               "handoff-report.txt contains DEPENDENCY_HANDOFF_OK"
             ]
+          : taskSnippetScoping
+            ? [
+                "alpha-report.txt exists",
+                "alpha-report.txt contains TASK_SNIPPET_SCOPE_OK"
+              ]
           : harnessStatusAction
           ? [
               "Git status context is captured",
