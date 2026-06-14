@@ -47,6 +47,13 @@ export interface CommandReceipt {
   durationMs: number;
 }
 
+export interface TaskObservation {
+  kind: string;
+  status: "success" | "warning" | "error";
+  summary: string;
+  content: string;
+}
+
 export interface TaskExecutionReceipt {
   taskId: string;
   executorKind: PlanTask["executor"];
@@ -54,6 +61,7 @@ export interface TaskExecutionReceipt {
   status: "success" | "warning" | "error";
   summary: string;
   requiredTools: string[];
+  observations: TaskObservation[];
   verificationCommands: string[];
   verificationResults: CommandReceipt[];
   artifacts: string[];

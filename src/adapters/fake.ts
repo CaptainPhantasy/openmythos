@@ -68,7 +68,9 @@ export class FakeAdapter implements ModelAdapter {
                 role: "verifier",
                 executor: harnessExecutor ? "harness" : "model",
                 fileTargets: ["openmythos-fake-output.txt"],
-                requiredTools: ["filesystem.read", "verification.command"],
+                requiredTools: harnessExecutor
+                  ? ["filesystem.read", "git.status", "verification.command"]
+                  : ["filesystem.read", "verification.command"],
                 verificationCommands: ["grep -qx 'OPENMYTHOS_FAKE_SUCCESS' openmythos-fake-output.txt"],
                 executionMode: "serial",
                 acceptanceCriteria: [

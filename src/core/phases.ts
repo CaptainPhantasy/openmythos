@@ -1,5 +1,6 @@
+import { existsSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { writeFile } from "node:fs/promises";
 import type { ZodType } from "zod";
 import { readRelativeFile } from "../tools/files.js";
 import type { OpenMythosConfig } from "../config/schema.js";
@@ -21,7 +22,7 @@ import { ApprovalRequiredError, createReviewBundle } from "./review.js";
 import { contextSchema, intakeSchema, planSchema, qaSchema, taskOutputSchema } from "./schemas.js";
 import { formatToolCatalogForPrompt, normalizePlanTools, summarizeToolValidationIssues } from "./tooling.js";
 import { buildExecutionBatches } from "./toposort.js";
-import type { AdapterRequest, CommandReceipt, ContextResult, IntakeResult, Plan, PlanTask, QaResult, ReviewBundle, TaskExecutionReceipt, TaskOutput } from "./types.js";
+import type { AdapterRequest, CommandReceipt, ContextResult, IntakeResult, Plan, PlanTask, QaResult, ReviewBundle, TaskExecutionReceipt, TaskObservation, TaskOutput } from "./types.js";
 import type { ModelUsageMetric } from "../state/types.js";
 
 export class PhaseExecutor {
@@ -147,6 +148,8 @@ export class PhaseExecutor {
           item.review,
           item.execution.executorKind,
           item.execution.executorRole,
+          item.execution.observations,
+          item.execution.artifacts,
           item.execution.verificationResults
         ));
         outputs.push(item.execution.output);
@@ -291,6 +294,8 @@ export class PhaseExecutor {
     output: TaskOutput;
     executorKind: PlanTask["executor"];
     executorRole: Extract<PlanTask["role"], "coder" | "critic" | "verifier">;
+    observations: TaskObservation[];
+    artifacts: string[];
     verificationResults?: CommandReceipt[];
   }> {
     if (task.executor === "harness") {
@@ -325,18 +330,29 @@ export class PhaseExecutor {
     return {
       output,
       executorKind: "model",
-      executorRole: role
+      executorRole: role,
+      observations: [],
+      artifacts: []
     };
   }
 
   private async executeHarnessTask(
-    task: PlanTask
+  task: PlanTask
   ): Promise<{
     output: TaskOutput;
     executorKind: "harness";
     executorRole: "verifier";
+    observations: TaskObservation[];
+    artifacts: string[];
     verificationResults: CommandReceipt[];
   }> {
+    const observations = await this.collectHarnessObservations(task);
+    const observationArtifactPath = resolve(this.runDir, `task-observation-${task.id}.json`);
+    await writeFile(
+      observationArtifactPath,
+      JSON.stringify({ taskId: task.id, observations }, null, 2),
+      "utf-8"
+    );
     const verificationResults = await this.runVerificationCommands(task.verificationCommands);
     const failures = verificationResults.filter((result) => result.exitCode !== 0);
 
@@ -352,6 +368,8 @@ export class PhaseExecutor {
       },
       executorKind: "harness",
       executorRole: "verifier",
+      observations,
+      artifacts: [observationArtifactPath],
       verificationResults
     };
   }
@@ -362,6 +380,8 @@ export class PhaseExecutor {
     review: ReviewBundle,
     executorKind: PlanTask["executor"],
     executorRole: Extract<PlanTask["role"], "coder" | "critic" | "verifier">,
+    observations: TaskObservation[],
+    extraArtifacts: string[],
     precomputedVerificationResults?: CommandReceipt[]
   ): Promise<TaskExecutionReceipt> {
     const verificationResults = precomputedVerificationResults ?? await this.runVerificationCommands(task.verificationCommands);
@@ -380,9 +400,10 @@ export class PhaseExecutor {
         status: "error",
         summary: `${actionSummary}, but ${failingResults.length} task verification command(s) failed.`,
         requiredTools: task.requiredTools,
+        observations,
         verificationCommands: task.verificationCommands,
         verificationResults,
-        artifacts: [...output.fileEdits.map((edit) => edit.path), review.reviewPath, review.patchPath],
+        artifacts: [...output.fileEdits.map((edit) => edit.path), ...extraArtifacts, review.reviewPath, review.patchPath],
         nextActions: [`Inspect the failing task verification command output for ${task.id}.`]
       };
     }
@@ -395,9 +416,10 @@ export class PhaseExecutor {
         status: "warning",
         summary: `${actionSummary}, but no task-level verification commands were provided.`,
         requiredTools: task.requiredTools,
+        observations,
         verificationCommands: [],
         verificationResults: [],
-        artifacts: [...output.fileEdits.map((edit) => edit.path), review.reviewPath, review.patchPath],
+        artifacts: [...output.fileEdits.map((edit) => edit.path), ...extraArtifacts, review.reviewPath, review.patchPath],
         nextActions: ["Add verificationCommands to this task for stronger local evidence."]
       };
     }
@@ -409,10 +431,134 @@ export class PhaseExecutor {
       status: "success",
       summary: `${actionSummary} and passed all task-level verification commands.`,
       requiredTools: task.requiredTools,
+      observations,
       verificationCommands: task.verificationCommands,
       verificationResults,
-      artifacts: [...output.fileEdits.map((edit) => edit.path), review.reviewPath, review.patchPath],
+      artifacts: [...output.fileEdits.map((edit) => edit.path), ...extraArtifacts, review.reviewPath, review.patchPath],
       nextActions: []
+    };
+  }
+
+  private async collectHarnessObservations(task: PlanTask): Promise<TaskObservation[]> {
+    const observations: TaskObservation[] = [];
+
+    if (task.requiredTools.includes("filesystem.read")) {
+      for (const file of task.fileTargets) {
+        try {
+          const content = await readRelativeFile(this.workdir, file);
+          observations.push({
+            kind: "filesystem.read",
+            status: "success",
+            summary: `Read ${file}`,
+            content
+          });
+        } catch (error) {
+          observations.push({
+            kind: "filesystem.read",
+            status: "warning",
+            summary: `Could not read ${file}`,
+            content: `[read failed: ${(error as Error).message}]`
+          });
+        }
+      }
+    }
+
+    if (task.requiredTools.includes("git.status")) {
+      const gitStatus = await this.collectGitStatusObservation();
+      if (gitStatus) {
+        observations.push(gitStatus);
+      }
+    }
+
+    if (task.requiredTools.includes("git.diff")) {
+      const gitDiff = await this.collectGitDiffObservation();
+      if (gitDiff) {
+        observations.push(gitDiff);
+      }
+    }
+
+    if (task.requiredTools.includes("git.issue_view")) {
+      const issueObservation = await this.collectArtifactObservation("issue.context", "issue.json");
+      if (issueObservation) {
+        observations.push(issueObservation);
+      }
+    }
+
+    if (task.requiredTools.includes("git.pr_view")) {
+      const pullRequestObservation = await this.collectArtifactObservation("pull_request.context", "pull-request.json");
+      if (pullRequestObservation) {
+        observations.push(pullRequestObservation);
+      }
+      const verificationObservation = await this.collectArtifactObservation("pull_request.verification", "pr-verification.json");
+      if (verificationObservation) {
+        observations.push(verificationObservation);
+      }
+    }
+
+    if (task.requiredTools.includes("review.inspect")) {
+      observations.push({
+        kind: "review.inspect",
+        status: "warning",
+        summary: "No review artifacts exist before apply.",
+        content: "Review artifacts are created after task execution when the harness evaluates proposed file edits."
+      });
+    }
+
+    return observations;
+  }
+
+  private async collectGitStatusObservation(): Promise<TaskObservation | null> {
+    const insideRepo = await executeShell("git rev-parse --is-inside-work-tree", this.workdir, this.config.execution.timeoutMs);
+    if (insideRepo.exitCode !== 0) {
+      return {
+        kind: "git.status",
+        status: "warning",
+        summary: "Working directory is not a git repository.",
+        content: [insideRepo.stdout, insideRepo.stderr].filter(Boolean).join("\n").trim() || "git rev-parse returned a non-zero exit code."
+      };
+    }
+
+    const status = await executeShell("git status --short --branch", this.workdir, this.config.execution.timeoutMs);
+    return {
+      kind: "git.status",
+      status: status.exitCode === 0 ? "success" : "error",
+      summary: status.exitCode === 0 ? "Captured git status." : "git status failed.",
+      content: [status.stdout, status.stderr].filter(Boolean).join("\n").trim()
+    };
+  }
+
+  private async collectGitDiffObservation(): Promise<TaskObservation | null> {
+    const insideRepo = await executeShell("git rev-parse --is-inside-work-tree", this.workdir, this.config.execution.timeoutMs);
+    if (insideRepo.exitCode !== 0) {
+      return {
+        kind: "git.diff",
+        status: "warning",
+        summary: "Working directory is not a git repository.",
+        content: [insideRepo.stdout, insideRepo.stderr].filter(Boolean).join("\n").trim() || "git rev-parse returned a non-zero exit code."
+      };
+    }
+
+    const diff = await executeShell("git diff --stat", this.workdir, this.config.execution.timeoutMs);
+    return {
+      kind: "git.diff",
+      status: diff.exitCode === 0 ? "success" : "error",
+      summary: diff.exitCode === 0 ? "Captured git diff summary." : "git diff failed.",
+      content: [diff.stdout, diff.stderr].filter(Boolean).join("\n").trim() || "(no diff output)"
+    };
+  }
+
+  private async collectArtifactObservation(kind: string, artifactName: string): Promise<TaskObservation | null> {
+    const artifactPath = resolve(this.runDir, artifactName);
+    if (!existsSync(artifactPath)) {
+      return null;
+    }
+
+    const content = await readFile(artifactPath, "utf-8");
+    return {
+      kind,
+      status: "success",
+      summary: `Captured ${artifactName}.`,
+      content
     };
   }
 

@@ -120,6 +120,8 @@ test("Runner can execute verifier tasks on the harness executor path", async () 
     executorKind: string;
     executorRole: string;
     status: string;
+    observations: Array<{ kind: string; status: string; content: string }>;
+    artifacts: string[];
   }>;
   const metrics = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "metrics.json"), "utf8")) as {
     modelTaskCount: number;
@@ -134,6 +136,11 @@ test("Runner can execute verifier tasks on the harness executor path", async () 
       ["task-2", "harness", "verifier", "success"]
     ]
   );
+  assert.equal(execution[1]?.observations[0]?.kind, "filesystem.read");
+  assert.match(execution[1]?.observations[0]?.content ?? "", /OPENMYTHOS_FAKE_SUCCESS/);
+  assert.equal(execution[1]?.observations[1]?.kind, "git.status");
+  assert.equal(execution[1]?.observations[1]?.status, "warning");
+  assert.ok(execution[1]?.artifacts.some((artifact) => artifact.endsWith("task-observation-task-2.json")));
   assert.equal(metrics.modelTaskCount, 1);
   assert.equal(metrics.harnessTaskCount, 1);
 });

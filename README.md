@@ -223,7 +223,10 @@ Each run writes an inspectable artifact set:
 - `plan.json`: schema-validated execution plan.
 - `outputs.json`: schema-validated worker outputs and file edits.
 - `execution.json`: deterministic task execution receipts, including required
-  tools, task-level verification commands, command results, and next actions.
+  tools, structured observations, task-level verification commands, command
+  results, and next actions.
+- `task-observation-*.json`: structured read-only evidence captured by
+  harness-executed verifier tasks.
 - `qa.json`: local and model verification result.
 - `issue.json`: canonical issue payload when a run was started from an issue
   source.
@@ -252,6 +255,8 @@ Plan task contract:
   repaired or rejected when they reference unsupported or role-mismatched tools
 - planners can set `executor = "harness"` for read-only verifier work so the
   harness can execute deterministic verification tasks without a model call
+- harness-executed verifier tasks retain structured observations such as file
+  reads, git state, and workflow artifact context for later QA and audit
 - task roles are now routed through matching worker lanes, including
   task-level `verifier` execution before the final QA gate
 - the harness can batch dependency-free tasks when they are marked
