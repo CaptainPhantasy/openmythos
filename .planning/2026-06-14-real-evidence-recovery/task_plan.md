@@ -80,6 +80,8 @@ Phase 4
 ## Notes
 
 - Start every continuation with `npm run cli -- readiness --workdir .`.
+- Before any continuation that starts execution in a model context, open and follow
+  `.planning/2026-06-14-real-evidence-recovery/next-worker-runbook.md`.
 - Do not count `src/test/fake-run.test.ts`, `profiles/fake.json`, or `src/adapters/fake.ts` as product evidence.
 - Do not remove fake tests unless they are actively blocking real evidence. They are still useful for deterministic regression coverage.
 - New product claims must point to real artifacts, preferably under `runs/real-evals/` or a similarly explicit retained-evidence path.

@@ -6,3 +6,7 @@ reviews/
 *.log
 .DS_Store
 .supercache/
+void-terminal/.claude/
+void-terminal/.omp/
+void-terminal/.harness/
+void-terminal/pebkac-starter/
