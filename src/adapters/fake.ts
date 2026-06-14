@@ -43,6 +43,7 @@ export class FakeAdapter implements ModelAdapter {
       const verifierRouting = request.messages.some((message) => message.content.includes("verifier task routing"));
       const harnessExecutor = request.messages.some((message) => message.content.includes("harness task execution"));
       const harnessStatusAction = request.messages.some((message) => message.content.includes("harness git status action"));
+      const taskScopedRetrieval = request.messages.some((message) => message.content.includes("task scoped retrieval"));
       const successCriteria = harnessStatusAction
         ? [
             "Git status context is captured",
@@ -63,6 +64,7 @@ export class FakeAdapter implements ModelAdapter {
                 role: "verifier",
                 executor: "harness",
                 harnessAction: "verify.git_status",
+                contextQueries: [],
                 fileTargets: [],
                 requiredTools: ["git.status", "verification.command"],
                 verificationCommands: ["test 1 -eq 1"],
@@ -70,6 +72,26 @@ export class FakeAdapter implements ModelAdapter {
                 acceptanceCriteria: [
                   "Git status context is captured",
                   "The verification command succeeds"
+                ]
+              }
+            ]
+          : taskScopedRetrieval
+          ? [
+              {
+                id: "task-1",
+                title: "Create fake output marker with task-scoped retrieval",
+                description: "Use deterministic search and symbol context before creating the marker file.",
+                role: "coder",
+                executor: "model",
+                harnessAction: null,
+                contextQueries: ["OPENMYTHOS_FAKE_SUCCESS", "locateTarget"],
+                fileTargets: ["openmythos-fake-output.txt"],
+                requiredTools: ["filesystem.search", "code.symbols", "filesystem.write"],
+                verificationCommands: ["test -f openmythos-fake-output.txt", "grep -qx 'OPENMYTHOS_FAKE_SUCCESS' openmythos-fake-output.txt"],
+                executionMode: "serial",
+                acceptanceCriteria: [
+                  "The file exists",
+                  "The file contains OPENMYTHOS_FAKE_SUCCESS"
                 ]
               }
             ]
@@ -82,6 +104,7 @@ export class FakeAdapter implements ModelAdapter {
                 role: "coder",
                 executor: "model",
                 harnessAction: null,
+                contextQueries: [],
                 fileTargets: ["openmythos-fake-output.txt"],
                 requiredTools: ["filesystem.write"],
                 verificationCommands: ["test -f openmythos-fake-output.txt"],
@@ -98,6 +121,7 @@ export class FakeAdapter implements ModelAdapter {
                 role: "verifier",
                 executor: harnessExecutor ? "harness" : "model",
                 harnessAction: harnessExecutor ? "verify.file_state" : null,
+                contextQueries: [],
                 fileTargets: ["openmythos-fake-output.txt"],
                 requiredTools: harnessExecutor
                   ? ["filesystem.read", "verification.command"]
@@ -118,6 +142,7 @@ export class FakeAdapter implements ModelAdapter {
                 role: "coder",
                 executor: "model",
                 harnessAction: null,
+                contextQueries: [],
                 fileTargets: ["openmythos-fake-output.txt"],
                 requiredTools: aliasTools ? ["write", "bash"] : ["filesystem.write"],
                 verificationCommands: failingVerification

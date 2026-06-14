@@ -17,6 +17,7 @@ import {
 } from "../prompts/contracts.js";
 import { applyFileEdits } from "../tools/files.js";
 import { executeShell, type ShellResult } from "../tools/shell.js";
+import { findSymbolDefinitions, searchRepository } from "../tools/retrieval.js";
 import { parseJsonFromModel } from "./json.js";
 import { ApprovalRequiredError, createReviewBundle } from "./review.js";
 import { contextSchema, intakeSchema, planSchema, qaSchema, taskOutputSchema } from "./schemas.js";
@@ -307,6 +308,18 @@ export class PhaseExecutor {
       return this.executeHarnessTask(task);
     }
 
+    const taskContextObservations = await this.collectModelTaskContext(task);
+    const taskContextArtifacts: string[] = [];
+    if (taskContextObservations.length > 0) {
+      const artifactPath = resolve(this.runDir, `task-context-${task.id}.json`);
+      await writeFile(
+        artifactPath,
+        JSON.stringify({ taskId: task.id, observations: taskContextObservations }, null, 2),
+        "utf-8"
+      );
+      taskContextArtifacts.push(artifactPath);
+    }
+
     const role = task.role;
     const currentFileState: Record<string, string> = {};
     for (const file of task.fileTargets) {
@@ -328,7 +341,7 @@ export class PhaseExecutor {
       json: true,
       messages: [{
         role: "user",
-        content: `Task:\n${JSON.stringify(task, null, 2)}\n\nSuccess criteria:\n${plan.successCriteria.map((criterion) => `- ${criterion}`).join("\n")}\n\nRelevant snippets:\n${snippets}\n\nCurrent file state:\n${JSON.stringify(currentFileState, null, 2)}\n\nPrior outputs:\n${JSON.stringify(priorOutputs, null, 2)}`
+        content: `Task:\n${JSON.stringify(task, null, 2)}\n\nSuccess criteria:\n${plan.successCriteria.map((criterion) => `- ${criterion}`).join("\n")}\n\nRelevant snippets:\n${snippets}\n\nTask tool context:\n${JSON.stringify(taskContextObservations, null, 2)}\n\nCurrent file state:\n${JSON.stringify(currentFileState, null, 2)}\n\nPrior outputs:\n${JSON.stringify(priorOutputs, null, 2)}`
       }]
     }, taskOutputSchema) as TaskOutput;
 
@@ -336,8 +349,8 @@ export class PhaseExecutor {
       output,
       executorKind: "model",
       executorRole: role,
-      observations: [],
-      artifacts: []
+      observations: taskContextObservations,
+      artifacts: taskContextArtifacts
     };
   }
 
@@ -528,6 +541,43 @@ export class PhaseExecutor {
         });
       }
     }
+  }
+
+  private async collectModelTaskContext(task: PlanTask): Promise<TaskObservation[]> {
+    const observations: TaskObservation[] = [];
+    const queries = [...new Set(task.contextQueries.map((query) => query.trim()).filter((query) => query.length > 0))];
+
+    if (task.requiredTools.includes("filesystem.search")) {
+      if (queries.length === 0) {
+        observations.push({
+          kind: "filesystem.search",
+          status: "warning",
+          summary: "No contextQueries were provided for filesystem.search.",
+          content: "Add one or more explicit task context queries to use repository text search."
+        });
+      } else {
+        for (const query of queries) {
+          observations.push(await searchRepository(this.workdir, query, this.config.execution.timeoutMs));
+        }
+      }
+    }
+
+    if (task.requiredTools.includes("code.symbols")) {
+      if (queries.length === 0) {
+        observations.push({
+          kind: "code.symbols",
+          status: "warning",
+          summary: "No contextQueries were provided for code.symbols.",
+          content: "Add identifier-like task context queries to use symbol lookup."
+        });
+      } else {
+        for (const query of queries) {
+          observations.push(await findSymbolDefinitions(this.workdir, query, this.config.execution.timeoutMs));
+        }
+      }
+    }
+
+    return observations;
   }
 
   private async collectGitStatusObservation(): Promise<TaskObservation | null> {

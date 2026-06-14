@@ -41,6 +41,7 @@ export interface PlanTask {
   role: Extract<ModelRole, "coder" | "critic" | "verifier">;
   executor: "model" | "harness";
   harnessAction: HarnessAction | null;
+  contextQueries: string[];
   fileTargets: string[];
   acceptanceCriteria: string[];
   requiredTools: string[];

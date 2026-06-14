@@ -27,6 +27,16 @@ const toolCatalog: ToolDefinition[] = [
     roles: ["coder", "critic", "verifier"]
   },
   {
+    id: "filesystem.search",
+    description: "Search repository text with deterministic fixed-string queries.",
+    roles: ["coder", "critic", "verifier"]
+  },
+  {
+    id: "code.symbols",
+    description: "Locate likely symbol definitions from explicit identifier queries.",
+    roles: ["coder", "critic", "verifier"]
+  },
+  {
     id: "filesystem.write",
     description: "Create or fully rewrite files.",
     roles: ["coder", "critic"]
@@ -122,6 +132,10 @@ const aliasMap: Record<string, string> = {
   "git.pull_request": "git.pr_view",
   "git.issue": "git.issue_view",
   read: "filesystem.read",
+  search: "filesystem.search",
+  grep: "filesystem.search",
+  symbols: "code.symbols",
+  symbol: "code.symbols",
   write: "filesystem.write",
   modify: "filesystem.write",
   patch: "filesystem.patch",

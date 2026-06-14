@@ -120,6 +120,7 @@ export const planTaskSchema = z.object({
     "verify.pr_context",
     "verify.pr_checks"
   ]).nullable().default(null),
+  contextQueries: stringListSchema.default([]),
   fileTargets: stringListSchema.default([]),
   acceptanceCriteria: stringListSchema.refine((items) => items.length > 0, "Expected at least one acceptance criterion"),
   requiredTools: stringListSchema.default([]),

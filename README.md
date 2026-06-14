@@ -225,6 +225,8 @@ Each run writes an inspectable artifact set:
 - `execution.json`: deterministic task execution receipts, including
   `executor`, `harnessAction`, required tools, structured observations,
   task-level verification commands, command results, and next actions.
+- `task-context-*.json`: structured task-scoped retrieval evidence captured
+  for model-executed tasks that request deterministic search or symbol context.
 - `task-observation-*.json`: structured read-only evidence captured by
   harness-executed verifier tasks.
 - `qa.json`: local and model verification result.
@@ -251,9 +253,14 @@ Plan task contract:
 
 - planners can now specify `requiredTools`, `executor`, `harnessAction`, and
   `executionMode`
+- planners can specify `contextQueries` to request deterministic task-scoped
+  retrieval during execution
 - planners can specify `verificationCommands` for task-level local evidence
 - `requiredTools` are normalized against a deterministic harness catalog and
   repaired or rejected when they reference unsupported or role-mismatched tools
+- model-executed tasks can now request deterministic repository search and
+  symbol lookup, and the harness retains the resulting task context as
+  structured observations and artifacts
 - planners can set `executor = "harness"` for read-only verifier work so the
   harness can execute deterministic verification tasks without a model call
 - harness-executed verifier tasks must declare a typed `harnessAction`, and the
@@ -269,6 +276,8 @@ Plan task contract:
 Current supported `requiredTools` ids:
 
 - `filesystem.read`
+- `filesystem.search`
+- `code.symbols`
 - `filesystem.write`
 - `filesystem.patch`
 - `shell.run`

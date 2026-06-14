@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -197,4 +197,30 @@ test("Runner can stop in awaiting_approval before applying risky edits", async (
   assert.equal(review.blocking, true);
   assert.equal(review.highestRisk, "high");
   assert.match(state.error ?? "", /Approval required/);
+});
+
+test("Runner retains task-scoped retrieval observations for model tasks", async () => {
+  const workdir = await mkdtemp(join(tmpdir(), "openmythos-fake-retrieval-"));
+  await mkdir(resolve(workdir, "src"), { recursive: true });
+  await writeFile(
+    resolve(workdir, "src", "example.ts"),
+    'export function locateTarget(): string {\n  return "OPENMYTHOS_FAKE_SUCCESS";\n}\n',
+    "utf8"
+  );
+
+  const config = await loadConfigWithOptionalProfile(resolve("openmythos.config.json"), "fake");
+  const runner = new Runner(config, new StateStore(resolve(workdir, "runs")), workdir);
+
+  const result = await runner.run("task scoped retrieval");
+  const execution = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "execution.json"), "utf8")) as Array<{
+    taskId: string;
+    observations: Array<{ kind: string; status: string; content: string }>;
+    artifacts: string[];
+  }>;
+
+  assert.equal(result.status, "completed");
+  assert.equal(execution[0]?.taskId, "task-1");
+  assert.ok(execution[0]?.observations.some((observation) => observation.kind === "filesystem.search" && /OPENMYTHOS_FAKE_SUCCESS/.test(observation.content)));
+  assert.ok(execution[0]?.observations.some((observation) => observation.kind === "code.symbols" && /locateTarget/.test(observation.content)));
+  assert.ok(execution[0]?.artifacts.some((artifact) => artifact.endsWith("task-context-task-1.json")));
 });

@@ -50,6 +50,7 @@ test("schemas normalize single string list fields from live model output", () =>
       role: "coder",
       executor: "model",
       harnessAction: null,
+      contextQueries: "OPENMYTHOS_LIVE_SUCCESS",
       fileTargets: "openmythos-live-output.txt",
       acceptanceCriteria: "file has exact marker",
       requiredTools: "filesystem.write",
@@ -61,6 +62,7 @@ test("schemas normalize single string list fields from live model output", () =>
   });
   const firstTask = plan.tasks[0];
   assert.ok(firstTask);
+  assert.deepEqual(firstTask.contextQueries, ["OPENMYTHOS_LIVE_SUCCESS"]);
   assert.deepEqual(firstTask.fileTargets, ["openmythos-live-output.txt"]);
   assert.deepEqual(firstTask.acceptanceCriteria, ["file has exact marker"]);
   assert.deepEqual(firstTask.requiredTools, ["filesystem.write"]);
