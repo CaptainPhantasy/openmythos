@@ -7,7 +7,7 @@ import { StateStore } from "../state/store.js";
 import { buildFinalReport } from "./report.js";
 import { PhaseExecutor } from "./phases.js";
 import { evaluateGovernance, GovernanceViolationError } from "./governance.js";
-import { ApprovalRequiredError } from "./review.js";
+import { ApprovalRequiredError, ToolApprovalRequiredError } from "./review.js";
 import { buildRunMetrics } from "./metrics.js";
 import type { ContextResult, IntakeResult, IssueContext, Plan, PullRequestContext, PullRequestVerification, QaResult, TaskOutput } from "./types.js";
 
@@ -243,22 +243,42 @@ export class Runner {
         finalOutput,
         artifacts: await this.artifacts(runId)
       };
-    } catch (error) {
-      if (error instanceof GovernanceViolationError) {
-        await this.store.fail(runId, error.message);
-        await this.writeMetrics(runId, executor, context, plan, outputs, qa);
-        return {
-          runId,
+      } catch (error) {
+        if (error instanceof GovernanceViolationError) {
+          await this.store.fail(runId, error.message);
+          await this.writeMetrics(runId, executor, context, plan, outputs, qa);
+          return {
+            runId,
           status: "failed",
           finalOutput: null,
           artifacts: await this.artifacts(runId)
-        };
-      }
-      if (error instanceof ApprovalRequiredError) {
-        await this.store.awaitApproval(runId, error.message);
-        await this.event(
-          runId,
-          "execute",
+          };
+        }
+        if (error instanceof ToolApprovalRequiredError) {
+          await this.store.awaitApproval(runId, error.message);
+          await this.event(
+            runId,
+            "execute",
+            "tool_approval_required",
+            "warning",
+            `Approval required for task ${error.payload.taskId} (${error.payload.tool})`,
+            [error.payload.artifactPath],
+            Date.now() - started,
+            error.message
+          );
+          await this.writeMetrics(runId, executor, context, plan, outputs, qa);
+          return {
+            runId,
+            status: "awaiting_approval",
+            finalOutput: null,
+            artifacts: await this.artifacts(runId)
+          };
+        }
+        if (error instanceof ApprovalRequiredError) {
+          await this.store.awaitApproval(runId, error.message);
+          await this.event(
+            runId,
+            "execute",
           "approval_required",
           "warning",
           `Approval required for ${error.taskId}`,

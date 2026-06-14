@@ -1,5 +1,28 @@
 # Progress Log
 
+## Session: 2026-06-14 (continued)
+
+### Phase 4: Expand Real Worker Actions
+
+- **Status:** in progress
+- **Started:** 2026-06-14
+- Actions taken:
+  - Added model-tool risk assessment in `src/core/phases.ts` for shell, package, git, and API tool requests.
+  - Added explicit enforce/suggest policy paths for high-risk tool calls with durable tool-approval artifacts.
+  - Added `ToolApprovalRequiredError` handling in `src/core/runner.ts` and wired a `tool_approval_required` execution event.
+  - Fixed model-tool approval branch wiring in `src/adapters/fake.ts` (`model tool approvals` goal).
+  - Added deterministic fake regression test `Runner can stop before high-risk model tool operations` to prove no output write occurs before approval.
+  - Ran `npm run build` and `npm test` successfully after changes.
+- Files created/modified:
+  - `src/core/phases.ts`
+  - `src/core/runner.ts`
+  - `src/core/review.ts`
+  - `src/adapters/fake.ts`
+  - `src/test/fake-run.test.ts`
+  - `.planning/2026-06-14-real-evidence-recovery/task_plan.md`
+  - `.planning/2026-06-14-real-evidence-recovery/findings.md`
+  - `.planning/2026-06-14-real-evidence-recovery/progress.md`
+
 ## Session: 2026-06-14
 
 ### Phase 4: Expand Real Worker Actions
@@ -117,8 +140,8 @@
 
 | Question | Answer |
 |----------|--------|
-| Where am I? | Phase 1 is complete and Phase 2 is complete. |
-| Where am I going? | Build real benchmark evidence, replace marker-file gates with real repo tasks, expand real worker actions, and enforce product readiness gates. |
-| What's the goal? | Replace fake-product claims with real verification paths so OpenMythos advances only through functional code, retained real-run evidence, and comparative benchmarks. |
-| What have I learned? | Fake tests are useful only for regression; product support requires real or comparative evidence. |
-| What have I done? | Created persistent planning files that instruct future workers how to repair the evidence problem. |
+| Where am I? | Phase 4 (Expand Real Worker Actions) is in progress and now includes policy-gated model-tool risk enforcement + regression proof of enforcement behavior. |
+| Where am I going? | Finish full 2027 default-harness capability: shell/package/git/browser/api/db execution loops with retained evidence, comparative superiority baselines, and TUI comfort-level workflow parity. |
+| What's the goal? | A Claude Code or Codex user can adopt OpenMythos as a default harness without losing workflow comfort, with retained evidence and improved verified outcomes on real tasks. |
+| What have I learned? | Fake tests remain useful for deterministic invariants only; harness policy gates must have direct, side-effect-safe real-enough tests before claiming user-facing capability. |
+| What have I done? | Added enforce-mode tool-approval gating for high-risk model tool actions, plus tests and documentation updates to prevent fake-confidence drift from resuming work. |

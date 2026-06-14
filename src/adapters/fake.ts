@@ -73,6 +73,7 @@ export class FakeAdapter implements ModelAdapter {
       const verifierRouting = request.messages.some((message) => message.content.includes("verifier task routing"));
       const harnessExecutor = request.messages.some((message) => message.content.includes("harness task execution"));
       const harnessStatusAction = request.messages.some((message) => message.content.includes("harness git status action"));
+      const modelToolApprovals = request.messages.some((message) => message.content.includes("model tool approvals"));
       const taskScopedRetrieval = request.messages.some((message) => message.content.includes("task scoped retrieval"));
       const modelToolLoop = request.messages.some((message) => message.content.includes("model tool loop"));
       const modelToolFamilies = request.messages.some((message) => message.content.includes("model tool families"));
@@ -120,11 +121,31 @@ export class FakeAdapter implements ModelAdapter {
                 ]
               }
         ]
+        : modelToolApprovals
+        ? [
+            {
+              id: "task-1",
+              title: "Request high-risk shell action before creating marker",
+              description: "Require model approval for a destructive shell tool before creating the output file.",
+              role: "coder",
+              executor: "model",
+              harnessAction: null,
+              contextQueries: [],
+              fileTargets: ["openmythos-fake-output.txt"],
+              requiredTools: ["shell.run", "filesystem.write"],
+              verificationCommands: ["test -f openmythos-fake-output.txt", "grep -qx 'OPENMYTHOS_FAKE_SUCCESS' openmythos-fake-output.txt"],
+              executionMode: "serial",
+              acceptanceCriteria: [
+                "The file exists",
+                "The file contains OPENMYTHOS_FAKE_SUCCESS"
+              ]
+            }
+          ]
       : modelToolLoop
       ? [
-          {
-            id: "task-1",
-            title: "Create fake output marker through model tool loop",
+      {
+        id: "task-1",
+        title: "Create fake output marker through model tool loop",
                 description: "Request read-only harness tools before producing the final file edit.",
                 role: "coder",
                 executor: "model",
@@ -369,6 +390,10 @@ export class FakeAdapter implements ModelAdapter {
     if (request.system.includes("implement one planned task") || request.system.includes("review and correct one planned task")) {
       const modelToolLoop = request.messages.some((message) => message.content.includes("Create fake output marker through model tool loop"));
       const modelToolFamilies = request.messages.some((message) => message.content.includes("Create fake output marker through expanded tool families"));
+      const modelToolApprovals = request.messages.some((message) =>
+        message.content.includes("model tool approvals") ||
+        message.content.includes("Require model approval for a destructive shell tool before creating the output file.")
+      );
       const modelVerificationCommandLoop = request.messages.some((message) => message.content.includes("Create fake output marker after command-backed verification"));
       const dependencyHandoffReport = request.messages.some((message) => message.content.includes("Create dependency handoff report"));
       const taskSnippetScoping = request.messages.some((message) => message.content.includes("Create alpha-only report"));
@@ -431,6 +456,21 @@ export class FakeAdapter implements ModelAdapter {
             : "Task-specific snippet context leaked unrelated repository snippets.",
           errors: hasAlphaSnippet && !leaksBetaSnippet ? [] : ["Task-specific snippet selection included unrelated repository context."],
           toolRequests: []
+        };
+      }
+      if (modelToolApprovals && !hasToolResults) {
+        return {
+          taskId,
+          status: "tool",
+          fileEdits: [],
+          summary: "Need one high-risk shell tool approval before writing output.",
+          errors: [],
+          toolRequests: [
+            {
+              tool: "shell.run",
+              input: { command: "rm -rf .tmp-openmythos-risky-path" }
+            }
+          ]
         };
       }
       if (modelVerificationCommandLoop && !hasToolResults) {

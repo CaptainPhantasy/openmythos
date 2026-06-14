@@ -206,6 +206,30 @@ test("Runner can stop in awaiting_approval before applying risky edits", async (
   assert.match(state.error ?? "", /Approval required/);
 });
 
+test("Runner can stop before high-risk model tool operations", async () => {
+  const workdir = await mkdtemp(join(tmpdir(), "openmythos-fake-tool-approval-"));
+  const config = await loadConfigWithOptionalProfile(resolve("openmythos.config.json"), "fake");
+  config.approval.mode = "enforce";
+
+  const runner = new Runner(config, new StateStore(resolve(workdir, "runs")), workdir);
+  const result = await runner.run("model tool approvals");
+
+  const state = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "state.json"), "utf8")) as { status: string; error: string | null };
+  const events = (await readFile(resolve(workdir, "runs", result.runId, "events.jsonl"), "utf8")
+    .then((raw) => raw.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as { action: string; artifacts: string[] })));
+  const runArtifacts = await (async () => {
+    const { readdir } = await import("node:fs/promises");
+    return readdir(resolve(workdir, "runs", result.runId));
+  })();
+
+  assert.equal(result.status, "awaiting_approval");
+  assert.equal(state.status, "awaiting_approval");
+  assert.match(state.error ?? "", /tool_approval_required|Approval required for task task-1/i);
+  assert.ok(events.some((event) => event.action === "tool_approval_required"));
+  await assert.rejects(() => readFile(resolve(workdir, "openmythos-fake-output.txt"), "utf8"));
+  assert.ok(runArtifacts.some((name) => name.startsWith("tool-approval-task-1-")));
+});
+
 test("Runner retains task-scoped retrieval observations for model tasks", async () => {
   const workdir = await mkdtemp(join(tmpdir(), "openmythos-fake-retrieval-"));
   await mkdir(resolve(workdir, "src"), { recursive: true });

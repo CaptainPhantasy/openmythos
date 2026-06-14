@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { OpenMythosConfig } from "../config/schema.js";
-import type { FileEdit, ReviewBundle, EditReview } from "./types.js";
+import type { FileEdit, ReviewBundle, EditReview, TaskToolRequest } from "./types.js";
 import { normalizeUnifiedPatch } from "../tools/files.js";
 
 const RISK_ORDER: Record<EditReview["risk"]["level"], number> = {
@@ -19,6 +19,21 @@ export class ApprovalRequiredError extends Error {
     super(
       `Approval required for task ${taskId}. Review artifacts: ${review.reviewPath}, ${review.patchPath}`
     );
+  }
+}
+
+export interface ToolApprovalPayload {
+  taskId: string;
+  tool: TaskToolRequest["tool"];
+  mode: OpenMythosConfig["approval"]["mode"];
+  reason: string;
+  request: TaskToolRequest;
+  artifactPath: string;
+}
+
+export class ToolApprovalRequiredError extends Error {
+  constructor(readonly payload: ToolApprovalPayload) {
+    super(`Approval required for task ${payload.taskId}: ${payload.reason}`);
   }
 }
 

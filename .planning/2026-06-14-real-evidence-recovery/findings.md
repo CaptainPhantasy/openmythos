@@ -13,6 +13,7 @@
 - The repository had no existing `.planning` directory before this work.
 - The current product roadmap is `docs/plans/2026-06-14-openmythos-2027-default-harness-roadmap.md`.
 - The roadmap already defines the product-complete target: OpenMythos must become a terminal-native daily coding harness that a Claude Code or Codex user can adopt without losing capability or comfort, and with measured improvement in verified outcomes.
+- The long-form product goal remains unchanged for 2027: a developer can use OpenMythos as their primary coding harness with workflow continuity and retained evidence showing equal or better outcomes than baseline Claude Code/Codex usage.
 - The roadmap evidence hierarchy correctly separates `fake`, `real`, and `comparative` evidence.
 - The `readiness` command is the right guardrail for future workers because it classifies fake evidence and missing product proof directly against the roadmap.
 
@@ -25,11 +26,13 @@
 | `src/test/fake-run.test.ts` | Fake regression test | Keep only as invariant coverage for schema, retries, receipts, and control flow. |
 | Fake-profile eval summaries | Fake retained artifacts | Keep as historical regression artifacts; do not count toward readiness. |
 | Live marker-file gate | Narrow real smoke evidence | Useful for endpoint/profile smoke, but insufficient for repo-work capability. |
+| model tool approvals path (`src/core/phases.ts`, `src/adapters/fake.ts`, `src/core/review.ts`) | Controlled regression | Keep as the minimum-risk enforcement test that proves high-risk operations do not write before approval. |
 
 ## Real Testing That Must Replace The Fake Confidence
 
 - Real repo task benchmarks: reproducible tasks that require actual code changes, test execution, and retained diffs.
 - Real tool-action tests: worker-loop tasks that exercise shell, package manager, git write, browser/UI verification, API, and database capabilities as those actions are added.
+- Real safety regression: at least one test must prove a high-risk model tool request raises enforce-mode approval and emits a tool-approval artifact before any output mutation.
 - Real verification receipts: every real task must retain the command, output, exit code, diff, model/profile, and final scoring artifact.
 - Comparative baselines: direct Claude Code and Codex task results must be stored beside OpenMythos results before superiority is claimed.
 - Readiness promotion: `readiness` must remain conservative and fail product support when evidence is fake, missing, or only a marker-file gate.

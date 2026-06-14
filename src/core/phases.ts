@@ -19,7 +19,7 @@ import { applyFileEdits } from "../tools/files.js";
 import { executeCommand, executeShell, type ShellResult } from "../tools/shell.js";
 import { findSymbolDefinitions, searchRepository } from "../tools/retrieval.js";
 import { parseJsonFromModel } from "./json.js";
-import { ApprovalRequiredError, createReviewBundle } from "./review.js";
+import { ApprovalRequiredError, ToolApprovalRequiredError, createReviewBundle } from "./review.js";
 import { contextSchema, intakeSchema, planSchema, qaSchema, taskOutputSchema, taskStepSchema } from "./schemas.js";
 import {
   formatHarnessActionCatalogForPrompt,
@@ -129,7 +129,7 @@ export class PhaseExecutor {
           ...task,
           verificationCommands: this.resolveTaskVerificationCommands(task, intake ?? null)
         };
-        const execution = await this.executeTask(resolvedTask, plan, context, outputs);
+        const execution = await this.executeTask(resolvedTask, plan, context, outputs, bypassReviewBlocking);
         const review = await createReviewBundle(
           this.workdir,
           this.runDir,
@@ -375,7 +375,8 @@ export class PhaseExecutor {
     task: PlanTask,
     plan: Plan,
     context: ContextResult,
-    priorOutputs: TaskOutput[]
+    priorOutputs: TaskOutput[],
+    bypassToolApproval = false
   ): Promise<{
     output: TaskOutput;
     executorKind: PlanTask["executor"];
@@ -424,7 +425,7 @@ export class PhaseExecutor {
       taskContextArtifacts.push(artifactPath);
     }
 
-    const loopResult = await this.executeModelTaskLoop(task, plan, taskSnippets, dependencyContext, taskContextObservations);
+    const loopResult = await this.executeModelTaskLoop(task, plan, taskSnippets, dependencyContext, taskContextObservations, bypassToolApproval);
     if (loopResult.artifactPath) {
       taskContextArtifacts.push(loopResult.artifactPath);
     }
@@ -677,7 +678,8 @@ export class PhaseExecutor {
     plan: Plan,
     taskSnippets: Record<string, string>,
     dependencyContext: { dependencyIds: string[]; outputs: TaskOutput[]; receipts: TaskExecutionReceipt[] },
-    taskContextObservations: TaskObservation[]
+    taskContextObservations: TaskObservation[],
+    bypassToolApproval = false
   ): Promise<{
     output: TaskOutput;
     toolTurnCount: number;
@@ -743,7 +745,7 @@ export class PhaseExecutor {
         };
       }
 
-      const observations = await this.executeModelToolRequests(task, step.toolRequests);
+      const observations = await this.executeModelToolRequests(task, step.toolRequests, bypassToolApproval);
       toolTurns.push({ turn: turn + 1, toolRequests: step.toolRequests, observations });
       toolObservations.push(...observations);
       messages.push({
@@ -862,10 +864,35 @@ export class PhaseExecutor {
     )];
   }
 
-  private async executeModelToolRequests(task: PlanTask, requests: TaskToolRequest[]): Promise<TaskObservation[]> {
+  private async executeModelToolRequests(task: PlanTask, requests: TaskToolRequest[], bypassApproval = false): Promise<TaskObservation[]> {
     const observations: TaskObservation[] = [];
     const limitedRequests = requests.slice(0, 3);
     for (const request of limitedRequests) {
+      const risk = this.assessToolRequestRisk(task.id, request);
+      if (risk.level === "high" && !bypassApproval) {
+        if (this.config.approval.mode === "enforce") {
+          const artifactPath = await this.writeToolApprovalArtifact(task.id, request, risk.reason);
+          throw new ToolApprovalRequiredError({
+            taskId: task.id,
+            tool: request.tool,
+            mode: this.config.approval.mode,
+            reason: risk.reason,
+            request,
+            artifactPath
+          });
+        }
+        if (this.config.approval.mode === "suggest") {
+          observations.push({
+            kind: request.tool,
+            status: "warning",
+            summary: "Model tool request is high-risk and running in suggest mode.",
+            content: risk.reason,
+            nextActions: ["Review this request and switch approval mode to enforce when proceeding in production."],
+            artifacts: []
+          });
+        }
+      }
+
       if (!task.requiredTools.includes(request.tool)) {
         observations.push({
           kind: request.tool,
@@ -1010,6 +1037,76 @@ export class PhaseExecutor {
       }
     }
     return observations;
+  }
+
+  private assessToolRequestRisk(taskId: string, request: TaskToolRequest): { level: "low" | "medium" | "high"; reason: string } {
+    if (request.tool === "shell.run") {
+      const command = (request.input.command ?? "").trim().toLowerCase();
+      if (/\b(rm|rmdir|mv)\b/.test(command)) {
+        return { level: "high", reason: `Task ${taskId} requested a destructive shell command: ${command}` };
+      }
+      return { level: "low", reason: "shell.run request is not flagged as destructive." };
+    }
+
+    if (request.tool === "package.install") {
+      const command = (request.input.command ?? "").trim().toLowerCase();
+      if (/(^|\s)(-g|--global)\b/.test(command)) {
+        return { level: "high", reason: `Task ${taskId} requested a global package change: ${command}` };
+      }
+      if (/uninstall\b/.test(command)) {
+        return { level: "high", reason: `Task ${taskId} requested a package uninstall: ${command}` };
+      }
+      return { level: "low", reason: "package.install request is scoped and non-destructive." };
+    }
+
+    if (request.tool === "git.branch") {
+      const action = (request.input.command ?? "").trim().toLowerCase();
+      if (action === "delete" || action === "delete-force" || action === "force-delete") {
+        return { level: "high", reason: `Task ${taskId} requested a high-risk git branch deletion: ${action}` };
+      }
+      return { level: "low", reason: "git.branch request is within normal branch operations." };
+    }
+
+    if (request.tool === "git.stage") {
+      const command = (request.input.command ?? "").trim().toLowerCase();
+      return command.includes("unstage")
+        ? { level: "medium", reason: "git.stage request is an unstage operation." }
+        : { level: "low", reason: "git.stage request is a staging operation." };
+    }
+
+    if (request.tool === "git.commit") {
+      return { level: "high", reason: `Task ${taskId} requested a git commit operation.` };
+    }
+
+    if (request.tool === "api.request") {
+      const requestText = (request.input.command ?? "").trim();
+      const parsed = this.parseApiRequest(requestText);
+      if (!parsed.ok) {
+        return { level: "high", reason: `Task ${taskId} requested an invalid API call shape: ${parsed.reason}` };
+      }
+      if (parsed.method !== "GET") {
+        return { level: "high", reason: `Task ${taskId} requested a non-GET API request: ${parsed.method} ${parsed.url}` };
+      }
+      return { level: "low", reason: "api.request is read-only GET request." };
+    }
+
+    return { level: "low", reason: "tool request has no explicit high-risk classification." };
+  }
+
+  private async writeToolApprovalArtifact(taskId: string, request: TaskToolRequest, reason: string): Promise<string> {
+    const artifactPath = resolve(this.runDir, `tool-approval-${taskId}-${Date.now()}.json`);
+    await writeFile(
+      artifactPath,
+      JSON.stringify({
+        taskId,
+        tool: request.tool,
+        request,
+        reason,
+        timestamp: new Date().toISOString()
+      }, null, 2),
+      "utf-8"
+    );
+    return artifactPath;
   }
 
   private async executeShellTool(command: string): Promise<TaskObservation> {

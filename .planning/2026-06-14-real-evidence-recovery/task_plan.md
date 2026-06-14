@@ -41,8 +41,9 @@ Phase 4
 - [x] Add first-run onboarding validation and a dedicated daily session entrypoint with real setup checks.
 - [x] Add repo lifecycle command surface (branch, stage, commit, rollback, publish-pr, release-check) so users can perform local write actions without leaving the harness command set.
 - [ ] Add or wire real task-loop actions for shell, package manager, git write, browser/UI verification, API, and database flows where appropriate.
-- [ ] Gate risky actions through explicit policy and retained receipts.
+- [x] Gate risky model-tool actions through explicit policy and retained approval artifacts.
 - [ ] Verify those actions against real fixture tasks before claiming parity.
+- [ ] Document and enforce the full 2027 default-harness goal: a user can complete Claude Code/Codex-style coding workflows with preserved intent, safety, and superior outcomes within the terminal UI.
 - **Status:** pending
 
 ### Phase 5: Product Readiness Promotion Gate
