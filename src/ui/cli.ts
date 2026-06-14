@@ -24,7 +24,7 @@ import { runSetupCheck } from "../core/setup.js";
 import { runReview } from "../core/reviewer.js";
 import { Runner } from "../core/runner.js";
 import { StateStore } from "../state/store.js";
-import { executeCommand } from "../tools/shell.js";
+import { executeCommand, executeShell } from "../tools/shell.js";
 import { runTui } from "./tui.js";
 
 export function buildCli(): Command {
@@ -228,6 +228,284 @@ export function buildCli(): Command {
       const resolved = await resolvePullRequestSource(source, resolve(options.workdir), config.execution.timeoutMs);
       console.log(JSON.stringify(resolved.verification, null, 2));
       if (resolved.verification.status === "error") {
+        process.exitCode = 1;
+      }
+    });
+
+  program.command("branch")
+    .description("Manage local git branches")
+    .argument("[name]", "Branch name")
+    .option("-w, --workdir <path>", "Target working directory", ".")
+    .option("--list", "List local branches")
+    .option("--current", "Show the current branch name")
+    .option("--create", "Create a branch")
+    .option("--switch", "Switch to a branch")
+    .option("--delete", "Delete a branch")
+    .option("--force", "Force delete a branch")
+    .action(async (name: string | undefined, options: {
+      workdir: string;
+      list?: boolean;
+      current?: boolean;
+      create?: boolean;
+      switch?: boolean;
+      delete?: boolean;
+      force?: boolean;
+    }) => {
+      const workdir = resolve(options.workdir);
+      const requestedModeCount = Number(Boolean(options.create)) + Number(Boolean(options.switch)) + Number(Boolean(options.delete));
+      if (options.current) {
+        const result = await executeCommand("git", ["branch", "--show-current"], workdir, 120000);
+        console.log(JSON.stringify({
+          action: "branch.current",
+          status: result.exitCode === 0 ? "ok" : "failed",
+          branch: result.stdout.trim() || null,
+          output: sanitizeCommandOutput(result.stdout, result.stderr)
+        }, null, 2));
+        if (result.exitCode !== 0) {
+          process.exitCode = 1;
+        }
+        return;
+      }
+
+      if (options.list || (!name && requestedModeCount === 0 && !options.create && !options.switch && !options.delete)) {
+        const result = await executeCommand("git", ["branch", "--color=never"], workdir, 120000);
+        console.log(JSON.stringify({
+          action: "branch.list",
+          status: result.exitCode === 0 ? "ok" : "failed",
+          branches: result.stdout.split("\n").map((line) => line.trim()).filter(Boolean)
+        }, null, 2));
+        if (result.exitCode !== 0) {
+          process.exitCode = 1;
+        }
+        return;
+      }
+
+      if (requestedModeCount > 1) {
+        console.error("branch requires only one mode at a time: --create, --switch, --delete");
+        process.exitCode = 1;
+        return;
+      }
+
+      if (!name) {
+        console.error("branch name is required for create, switch, and delete actions");
+        process.exitCode = 1;
+        return;
+      }
+
+      if (options.delete) {
+        const result = await executeCommand("git", ["branch", options.force ? "-D" : "-d", name], workdir, 120000);
+        console.log(JSON.stringify({
+          action: options.force ? "branch.delete-force" : "branch.delete",
+          status: result.exitCode === 0 ? "ok" : "failed",
+          branch: name,
+          output: sanitizeCommandOutput(result.stdout, result.stderr)
+        }, null, 2));
+        if (result.exitCode !== 0) {
+          process.exitCode = 1;
+        }
+        return;
+      }
+
+      const command = options.switch ? ["switch", name] : ["branch", name];
+      if (options.create && requestedModeCount === 0) {
+        command.pop();
+        command.push(name);
+      }
+
+      const result = await executeCommand("git", options.create ? ["branch", name] : command, workdir, 120000);
+      console.log(JSON.stringify({
+        action: options.switch ? "branch.switch" : "branch.create",
+        status: result.exitCode === 0 ? "ok" : "failed",
+        branch: name,
+        output: sanitizeCommandOutput(result.stdout, result.stderr)
+      }, null, 2));
+      if (result.exitCode !== 0) {
+        process.exitCode = 1;
+      }
+    });
+
+  program.command("stage")
+    .description("Stage and unstage repository paths")
+    .argument("<paths...>", "Paths to stage (or unstage with --unstage)")
+    .option("-w, --workdir <path>", "Target working directory", ".")
+    .option("--unstage", "Unstage the listed paths")
+    .action(async (paths: string[], options: { workdir: string; unstage?: boolean; }) => {
+      const args = options.unstage
+        ? ["restore", "--staged", "--", ...paths]
+        : ["add", "--", ...paths];
+      const result = await executeCommand("git", args, resolve(options.workdir), 120000);
+      console.log(JSON.stringify({
+        action: options.unstage ? "stage.unstage" : "stage.add",
+        status: result.exitCode === 0 ? "ok" : "failed",
+        paths,
+        output: sanitizeCommandOutput(result.stdout, result.stderr)
+      }, null, 2));
+      if (result.exitCode !== 0) {
+        process.exitCode = 1;
+      }
+    });
+
+  program.command("commit")
+    .description("Create a repository commit")
+    .option("-m, --message <text>", "Commit message", "work-item update")
+    .option("--allow-empty", "Allow an empty commit")
+    .option("-w, --workdir <path>", "Target working directory", ".")
+    .action(async (options: { message: string; allowEmpty?: boolean; workdir: string; }) => {
+      const message = options.message.trim() || "work-item update";
+      const result = await executeCommand(
+        "git",
+        options.allowEmpty ? ["commit", "-m", message, "--allow-empty"] : ["commit", "-m", message],
+        resolve(options.workdir),
+        120000
+      );
+      const commit = await executeCommand("git", ["rev-parse", "HEAD"], resolve(options.workdir), 120000);
+      console.log(JSON.stringify({
+        action: "commit",
+        status: result.exitCode === 0 ? "ok" : "failed",
+        message,
+        commit: commit.exitCode === 0 ? commit.stdout.trim() : null,
+        output: sanitizeCommandOutput(result.stdout, result.stderr)
+      }, null, 2));
+      if (result.exitCode !== 0) {
+        process.exitCode = 1;
+      }
+    });
+
+  program.command("rollback")
+    .description("Rollback working state for repository recovery")
+    .option("-w, --workdir <path>", "Target working directory", ".")
+    .option("-t, --target <ref>", "Reset target", "HEAD")
+    .option("--clean", "Clean untracked files")
+    .option("--hard", "Use hard reset")
+    .option("--force", "Confirm destructive rollback operations")
+    .action(async (options: {
+      workdir: string;
+      target: string;
+      clean?: boolean;
+      hard?: boolean;
+      force?: boolean;
+    }) => {
+      const workdir = resolve(options.workdir);
+      if ((options.hard || options.clean) && !options.force) {
+        console.error("rollback --force is required for --hard and --clean");
+        process.exitCode = 1;
+        return;
+      }
+      const mode = options.hard ? "--hard" : "--soft";
+      const reset = await executeCommand("git", ["reset", mode, options.target], workdir, 120000);
+      const clean = options.clean
+        ? await executeCommand("git", ["clean", "-fd"], workdir, 120000)
+        : null;
+      const status = await executeCommand("git", ["status", "--short", "--branch"], workdir, 120000);
+      console.log(JSON.stringify({
+        action: "rollback",
+        status: reset.exitCode === 0 && status.exitCode === 0 && !(options.clean && clean?.exitCode !== 0) ? "ok" : "failed",
+        mode,
+        target: options.target,
+        resetOutput: sanitizeCommandOutput(reset.stdout, reset.stderr),
+        cleanOutput: clean === null ? null : sanitizeCommandOutput(clean.stdout, clean.stderr),
+        workingTree: status.stdout.trim()
+      }, null, 2));
+      if (reset.exitCode !== 0 || status.exitCode !== 0 || (options.clean && clean?.exitCode !== 0)) {
+        process.exitCode = 1;
+      }
+    });
+
+  program.command("publish-pr")
+    .description("Prepare or publish a PR from the current branch")
+    .option("-t, --title <text>", "PR title", "OpenMythos PR")
+    .option("-b, --body <text>", "PR body", "Created with OpenMythos")
+    .option("--base <branch>", "PR base branch", "main")
+    .option("--dry-run", "Print only the gh command to run")
+    .option("-w, --workdir <path>", "Target working directory", ".")
+    .action(async (options: { title: string; body: string; base: string; dryRun: boolean; workdir: string; }) => {
+      const workdir = resolve(options.workdir);
+      const command = `gh pr create --base ${shellQuote(options.base)} --title ${shellQuote(options.title)} --body ${shellQuote(options.body)}`;
+      const hasGh = await executeCommand("gh", ["--version"], workdir, 120000);
+      if (hasGh.exitCode !== 0) {
+        console.log(JSON.stringify({
+          action: "publish-pr",
+          status: "failed",
+          reason: "gh CLI missing",
+          command
+        }, null, 2));
+        process.exitCode = 1;
+        return;
+      }
+      if (options.dryRun) {
+        console.log(JSON.stringify({
+          action: "publish-pr",
+          status: "ready",
+          command
+        }, null, 2));
+        return;
+      }
+      const result = await executeCommand("sh", ["-c", command], workdir, 120000);
+      console.log(JSON.stringify({
+        action: "publish-pr",
+        status: result.exitCode === 0 ? "ok" : "failed",
+        command,
+        output: sanitizeCommandOutput(result.stdout, result.stderr)
+      }, null, 2));
+      if (result.exitCode !== 0) {
+        process.exitCode = 1;
+      }
+    });
+
+  program.command("release-check")
+    .description("Run release gate checks and emit a retained report")
+    .option("-w, --workdir <path>", "Target repository root", ".")
+    .option("--output <path>", "Write report to this path")
+    .option("--skip-tests", "Skip npm test while checking")
+    .action(async (options: {
+      workdir: string;
+      output?: string;
+      skipTests?: boolean;
+    }) => {
+      const workdir = resolve(options.workdir);
+      const checks: Array<{ name: string; passed: boolean; detail: string }> = [];
+
+      const build = await executeShell("npm run build", workdir, 120000);
+      checks.push({
+        name: "build",
+        passed: build.exitCode === 0,
+        detail: build.exitCode === 0 ? "npm run build" : sanitizeCommandOutput(build.stdout, build.stderr)
+      });
+
+      const test = options.skipTests
+        ? { exitCode: 0, stdout: "skipped by --skip-tests", stderr: "" }
+        : await executeShell("npm test", workdir, 120000);
+      checks.push({
+        name: options.skipTests ? "test (skipped)" : "test",
+        passed: test.exitCode === 0,
+        detail: test.exitCode === 0 ? "npm test" : sanitizeCommandOutput(test.stdout, test.stderr)
+      });
+
+      const readiness = await buildReadinessReport(workdir);
+      checks.push({
+        name: "readiness",
+        passed: readiness.summary.missingEvidenceCount === 0 && readiness.summary.partialCount === 0 && readiness.summary.unprovenCount === 0,
+        detail: `missingEvidence=${readiness.summary.missingEvidenceCount}, partialGoals=${readiness.summary.partialCount}, unprovenGoals=${readiness.summary.unprovenCount}`
+      });
+
+      const status = await executeCommand("git", ["status", "--short"], workdir, 120000);
+      const releaseReady = checks.every((entry) => entry.passed);
+      const report = {
+        schemaVersion: "release-check.v1",
+        generatedAt: new Date().toISOString(),
+        workdir,
+        checks,
+        readinessSummary: readiness.summary,
+        git: {
+          hasChanges: status.stdout.trim().length > 0,
+          status: sanitizeCommandOutput(status.stdout)
+        }
+      };
+      const payload = JSON.stringify(report, null, 2);
+      const outputPath = resolve(workdir, options.output ?? "release-check.json");
+      await writeFile(outputPath, payload, "utf8");
+      console.log(payload);
+      if (!releaseReady) {
         process.exitCode = 1;
       }
     });
@@ -559,6 +837,14 @@ function countLeadingCompleted(results: Array<{ status: string }>): number {
     count += 1;
   }
   return count;
+}
+
+function sanitizeCommandOutput(...parts: string[]): string {
+  return parts.filter(Boolean).join("\n").trim();
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 function countLeadingPassed(results: Array<{ passed: boolean }>): number {

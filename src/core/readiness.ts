@@ -108,8 +108,18 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
   const cliSource = await readOptional(resolve(repoRoot, "src/ui/cli.ts"));
   const phasesSource = await readOptional(resolve(repoRoot, "src/core/phases.ts"));
   const tuiSource = await readOptional(resolve(repoRoot, "src/ui/tui.ts"));
+  const hasCommand = (name: string) => cliSource.includes(`program.command("${name}")`);
   const hasSessionCommand = cliSource.includes('program.command("session")');
   const hasSetupCommand = cliSource.includes('program.command("setup")');
+  const requiredRepoWorkflowCommands = [
+    "branch",
+    "stage",
+    "commit",
+    "rollback",
+    "publish-pr",
+    "release-check"
+  ];
+  const missingRepoWorkflowCommands = requiredRepoWorkflowCommands.filter((command) => !hasCommand(command));
   const hasWorkflowControlCommands = [
     'program.command("approve")',
     'program.command("reject")',
@@ -133,7 +143,7 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
   const commandEvidence = evidence(
     "cli.commands",
     "real",
-    "CLI exposes run, issue, PR, review, bench, eval, live-eval, real-eval, real-benchmark, and TUI commands.",
+    "CLI exposes run, issue, PR, review, bench, eval, live-eval, real-eval, real-benchmark, release-check, and TUI commands.",
     ["src/ui/cli.ts"],
     []
   );
@@ -219,11 +229,75 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
       ["Add direct Claude Code and Codex baseline artifacts for this same fixture."]
     )
     : null;
+  const claudeBaselinePath = resolve(repoRoot, "runs/comparative-baselines/claude-code");
+  const codexBaselinePath = resolve(repoRoot, "runs/comparative-baselines/codex");
+  const comparativeBaselineArtifacts = await Promise.all([
+    collectSummaryArtifacts(claudeBaselinePath),
+    collectSummaryArtifacts(codexBaselinePath)
+  ]);
+  const hasClaudeBaseline = comparativeBaselineArtifacts[0].length > 0;
+  const hasCodexBaseline = comparativeBaselineArtifacts[1].length > 0;
+  const comparativeBaselineEvidence: EvidenceItem[] = [];
+  if (!hasClaudeBaseline) {
+    comparativeBaselineEvidence.push(
+      evidence(
+        "comparative.claude.missing",
+        "missing",
+        "No Claude Code comparative baseline artifacts were found under runs/comparative-baselines/claude-code.",
+        ["runs/comparative-baselines/claude-code"],
+        ["Add retained CLAUDE-CODE comparative baseline artifacts for representative tasks and fixtures."]
+      )
+    );
+  } else {
+    comparativeBaselineEvidence.push(evidence(
+      "comparative.claude.present",
+      "real",
+      "Claude Code comparative baseline artifacts are present.",
+      comparativeBaselineArtifacts[0],
+      []
+    ));
+  }
+  if (!hasCodexBaseline) {
+    comparativeBaselineEvidence.push(
+      evidence(
+        "comparative.codex.missing",
+        "missing",
+        "No Codex comparative baseline artifacts were found under runs/comparative-baselines/codex.",
+        ["runs/comparative-baselines/codex"],
+        ["Add retained Codex comparative baseline artifacts for representative tasks and fixtures."]
+      )
+    );
+  } else {
+    comparativeBaselineEvidence.push(evidence(
+      "comparative.codex.present",
+      "real",
+      "Codex comparative baseline artifacts are present.",
+      comparativeBaselineArtifacts[1],
+      []
+    ));
+  }
 
-  const outcomeSuperiorityRealEvidence = [realEvalWorkflowEvidence, realEvalResultEvidence]
+  const outcomeSuperiorityRealEvidence = [realEvalWorkflowEvidence, realEvalResultEvidence, ...comparativeBaselineEvidence.filter((item) => item.level === "real")]
     .filter((item): item is EvidenceItem => item !== null);
   const outcomeSuperiorityMissingEvidence = [evidence("comparative.baselines.missing", "missing", "No real-task benchmark suite with direct Claude Code and Codex baselines exists.", ["docs/plans/2026-06-14-openmythos-2027-default-harness-roadmap.md"], ["Add real repository benchmark tasks and retained baseline results for direct Claude Code and Codex runs."])]
-    .concat(strongestRealEval === null ? [evidence("real.eval.missing", "missing", "No passed real fixture-backed eval was found under runs/real-evals.", ["runs/real-evals"], ["Run retained live-eval on noop-js or trim-js and keep a real-evidence summary."])] : []);
+    .concat(comparativeBaselineEvidence.filter((item) => item.level === "missing"))
+    .concat(strongestRealEval === null
+      ? [evidence("real.eval.missing", "missing", "No passed real fixture-backed eval was found under runs/real-evals.", ["runs/real-evals"], ["Run retained live-eval on noop-js or trim-js and keep a real-evidence summary."])]
+      : []);
+  if (hasClaudeBaseline && hasCodexBaseline) {
+    outcomeSuperiorityMissingEvidence.splice(
+      outcomeSuperiorityMissingEvidence.findIndex((item) => item.id === "comparative.baselines.missing"),
+      1
+    );
+    const summaryArtifactEvidence = Array.from(new Set([...comparativeBaselineArtifacts[0], ...comparativeBaselineArtifacts[1]]));
+    outcomeSuperiorityRealEvidence.push(evidence(
+      "comparative.outcomes",
+      "real",
+      "Direct comparative baseline artifacts for Claude Code and Codex are present.",
+      summaryArtifactEvidence,
+      []
+    ));
+  }
 
   return [
     goal(
@@ -271,19 +345,25 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
       "repo-workflow",
       "OpenMythos Owns The Full Repo Workflow",
       [
-        evidence("issue.pr.review", "real", "Issue ingestion, PR ingestion, PR check summaries, and local review workflow exist.", ["src/core/issues.ts", "src/core/pull-requests.ts", "src/core/reviewer.ts"], [])
+        evidence("issue.pr.review", "real", "Issue ingestion, PR ingestion, PR check summaries, and local review workflow exist.", ["src/core/issues.ts", "src/core/pull-requests.ts", "src/core/reviewer.ts"], []),
+        ...(missingRepoWorkflowCommands.length === 0
+          ? [evidence("git.write.workflow", "real", "CLI exposes branch, stage, commit, rollback, publish-pr, and release-check workflow commands for repo lifecycle operations.", ["src/ui/cli.ts"], [])]
+          : []
+        )
       ],
       [],
       [
-        evidence("git.write.workflow.missing", "missing", "No branch creation, staging, commit preparation, rollback, or PR publication workflow exists.", ["src/ui/cli.ts", "src/core"], ["Add repo lifecycle commands and harness tool actions for branch, stage, commit, rollback, and PR review publication."])
+        ...(missingRepoWorkflowCommands.length === 0
+          ? []
+          : [evidence("git.write.workflow.missing", "missing", "Missing repo lifecycle workflow commands: " + missingRepoWorkflowCommands.join(", "), ["src/ui/cli.ts"], ["Add missing repo commands and connect them to your repo workflow."])]
+        )
       ]
     ),
-      goal(
+    goal(
       "comfortable-adoption",
       "OpenMythos Is Comfortable To Adopt",
       [
-        evidence("readme.usage", "real", "README documents installation, profiles, usage, review, issue, PR, TUI, and benchmark commands.", ["README.md"], [])
-        ,
+        evidence("readme.usage", "real", "README documents installation, profiles, usage, review, issue, PR, TUI, and benchmark commands.", ["README.md"], []),
         ...(hasSetupCommand
           ? [evidence("onboarding.setup", "real", "Setup command validates config, profile, workspace, and key availability for first run.", ["src/ui/cli.ts", "src/core/setup.ts"], [])]
           : [])
@@ -434,6 +514,11 @@ async function findFiles(root: string, targetName: string, maxDepth: number, dep
     }
   }
   return results;
+}
+
+async function collectSummaryArtifacts(root: string): Promise<string[]> {
+  const summaries = await findFiles(root, "summary.json", 10);
+  return summaries.map((summaryPath) => relative(root, summaryPath));
 }
 
 function extractToolUnion(typesSource: string): string[] {

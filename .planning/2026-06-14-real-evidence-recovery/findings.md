@@ -34,6 +34,19 @@
 - Comparative baselines: direct Claude Code and Codex task results must be stored beside OpenMythos results before superiority is claimed.
 - Readiness promotion: `readiness` must remain conservative and fail product support when evidence is fake, missing, or only a marker-file gate.
 
+## Current Capability State (2026-06-14)
+
+Current gains:
+
+- Repo lifecycle workflow commands (`branch`, `stage`, `commit`, `rollback`, `publish-pr`, `release-check`) now exist and are detected by readiness as real product evidence.
+- Readiness now distinguishes real outcomes from missing comparative baselines and refuses to award baseline superiority claims without present evidence.
+
+Remaining high-impact gaps:
+
+- Task tool loop still lacks shell/package manager/browser/API/database action families in worker execution.
+- `ready for default-harness` behavior is still blocked until superiority benchmarks are populated with Claude Code and Codex retained baselines.
+- TUI remains inspection-first; approval/review replay controls exist in CLI but still require more comfort-level flow for steady daily use.
+
 ## Technical Decisions
 
 | Decision | Rationale |

@@ -52,6 +52,121 @@ test("buildReadinessReport separates fake regression evidence from product evide
   assert.ok(report.summary.missingEvidenceCount > 0);
 });
 
+test("repo-workflow evidence is real only when repo lifecycle commands are present", async () => {
+  const root = await mkdtemp(join(tmpdir(), "openmythos-readiness-repo-workflow-"));
+  await mkdir(resolve(root, "src/core"), { recursive: true });
+  await mkdir(resolve(root, "src/ui"), { recursive: true });
+  await mkdir(resolve(root, "src/adapters"), { recursive: true });
+  await mkdir(resolve(root, "src/test"), { recursive: true });
+  await mkdir(resolve(root, "profiles"), { recursive: true });
+  await mkdir(resolve(root, "docs/plans"), { recursive: true });
+  await mkdir(resolve(root, "runs"), { recursive: true });
+  await mkdir(resolve(root, "runs/live-evals/eval-1"), { recursive: true });
+  await mkdir(resolve(root, "runs/real-evals/eval-1"), { recursive: true });
+  await writeFile(resolve(root, "docs/plans/2026-06-14-openmythos-2027-default-harness-roadmap.md"), "roadmap\n", "utf8");
+  await writeFile(resolve(root, "src/ui/cli.ts"), 'program.command("branch"); program.command("stage"); program.command("commit"); program.command("rollback"); program.command("publish-pr"); program.command("release-check"); program.command("run"); program.command("tui");', "utf8");
+  await writeFile(resolve(root, "src/ui/tui.ts"), "Keys: j/down next | k/up previous | r refresh | q quit\n", "utf8");
+  await writeFile(resolve(root, "src/core/types.ts"), 'export interface TaskToolRequest { tool: "filesystem.read" | "verification.command"; }\\n', "utf8");
+  await writeFile(resolve(root, "src/core/phases.ts"), "task-tool-turns\\n", "utf8");
+  await writeFile(resolve(root, "src/core/governance.ts"), "governance\n", "utf8");
+  await writeFile(resolve(root, "src/core/review.ts"), "review\n", "utf8");
+  await writeFile(resolve(root, "src/core/issues.ts"), "issues\n", "utf8");
+  await writeFile(resolve(root, "src/core/pull-requests.ts"), "pulls\n", "utf8");
+  await writeFile(resolve(root, "src/core/reviewer.ts"), "reviewer\n", "utf8");
+  await writeFile(resolve(root, "src/core/real-eval.ts"), "export const noop = true;\n", "utf8");
+  await writeFile(resolve(root, "src/adapters/fake.ts"), "export class FakeAdapter {}\\n", "utf8");
+  await writeFile(resolve(root, "profiles/fake.json"), "{}\n", "utf8");
+  await writeFile(resolve(root, "src/test/fake-run.test.ts"), "test('fake', () => {})\n", "utf8");
+  await writeFile(resolve(root, "README.md"), "usage\n", "utf8");
+  await writeFile(resolve(root, "runs/live-evals/eval-1/summary.json"), JSON.stringify({
+    evidenceLevel: "smoke",
+    passed: true,
+    requiredConsecutiveRounds: 3,
+    successfulConsecutiveRounds: 3,
+    profile: "zai-live-gate"
+  }, null, 2), "utf8");
+  await writeFile(resolve(root, "runs/real-evals/eval-1/summary.json"), JSON.stringify({
+    evidenceLevel: "real",
+    fixture: "noop-js",
+    passed: true,
+    requiredConsecutiveRounds: 3,
+    successfulConsecutiveRounds: 3,
+    profile: "zai-5"
+  }, null, 2), "utf8");
+
+  const report = await buildReadinessReport(root);
+  const workflow = report.productGoals.find((goal) => goal.id === "repo-workflow");
+  assert.equal(workflow?.missingEvidence.some((item) => item.id === "git.write.workflow.missing"), false);
+  assert.equal(workflow?.realEvidence.some((item) => item.id === "git.write.workflow"), true);
+});
+
+test("outcome-superiority uses comparative-baseline evidence when both Claude and Codex baselines are present", async () => {
+  const root = await mkdtemp(join(tmpdir(), "openmythos-readiness-comparative-"));
+  await mkdir(resolve(root, "src/core"), { recursive: true });
+  await mkdir(resolve(root, "src/adapters"), { recursive: true });
+  await mkdir(resolve(root, "src/ui"), { recursive: true });
+  await mkdir(resolve(root, "src/test"), { recursive: true });
+  await mkdir(resolve(root, "profiles"), { recursive: true });
+  await mkdir(resolve(root, "docs/plans"), { recursive: true });
+  await mkdir(resolve(root, "runs"), { recursive: true });
+  await mkdir(resolve(root, "runs/live-evals/eval-1"), { recursive: true });
+  await mkdir(resolve(root, "runs/real-evals/eval-1"), { recursive: true });
+  await mkdir(resolve(root, "runs/comparative-baselines/claude-code"), { recursive: true });
+  await mkdir(resolve(root, "runs/comparative-baselines/codex"), { recursive: true });
+  await writeFile(resolve(root, "docs/plans/2026-06-14-openmythos-2027-default-harness-roadmap.md"), "roadmap\n", "utf8");
+  await writeFile(resolve(root, "src/ui/cli.ts"), 'program.command("run"); program.command("tui");\n', "utf8");
+  await writeFile(resolve(root, "src/ui/tui.ts"), "Keys: j/down next | k/up previous | r refresh | q quit\n", "utf8");
+  await writeFile(resolve(root, "src/adapters/fake.ts"), "export class FakeAdapter {}\n", "utf8");
+  await writeFile(resolve(root, "profiles/fake.json"), "{}", "utf8");
+  await writeFile(resolve(root, "src/test/fake-run.test.ts"), "test('fake', () => {})\n", "utf8");
+  await writeFile(resolve(root, "src/core/types.ts"), 'export interface TaskToolRequest { tool: "filesystem.read" | "verification.command"; }\\n', "utf8");
+  await writeFile(resolve(root, "src/core/phases.ts"), "task-tool-turns\\n", "utf8");
+  await writeFile(resolve(root, "src/core/governance.ts"), "governance\n", "utf8");
+  await writeFile(resolve(root, "src/core/review.ts"), "review\n", "utf8");
+  await writeFile(resolve(root, "src/core/issues.ts"), "issues\n", "utf8");
+  await writeFile(resolve(root, "src/core/pull-requests.ts"), "pulls\n", "utf8");
+  await writeFile(resolve(root, "src/core/reviewer.ts"), "reviewer\n", "utf8");
+  await writeFile(resolve(root, "src/core/real-eval.ts"), "export const noop = true;\n", "utf8");
+  await writeFile(resolve(root, "README.md"), "usage\n", "utf8");
+  await mkdir(resolve(root, "fixtures/real-eval/noop-js"), { recursive: true });
+  await mkdir(resolve(root, "fixtures/real-eval/trim-js"), { recursive: true });
+  await writeFile(resolve(root, "fixtures/real-eval/noop-js/manifest.json"), "{}", "utf8");
+  await writeFile(resolve(root, "runs/live-evals/eval-1/summary.json"), JSON.stringify({
+    evidenceLevel: "smoke",
+    passed: true,
+    requiredConsecutiveRounds: 3,
+    successfulConsecutiveRounds: 3,
+    profile: "zai-live-gate"
+  }, null, 2), "utf8");
+  await writeFile(resolve(root, "runs/real-evals/eval-1/summary.json"), JSON.stringify({
+    evidenceLevel: "real",
+    fixture: "noop-js",
+    passed: true,
+    requiredConsecutiveRounds: 3,
+    successfulConsecutiveRounds: 3,
+    profile: "zai-5"
+  }, null, 2), "utf8");
+  await writeFile(resolve(root, "runs/comparative-baselines/claude-code/summary.json"), JSON.stringify({
+    evidenceType: "comparative",
+    profile: "claude",
+    passed: true
+  }, null, 2), "utf8");
+  await writeFile(resolve(root, "runs/comparative-baselines/codex/summary.json"), JSON.stringify({
+    evidenceType: "comparative",
+    profile: "codex",
+    passed: true
+  }, null, 2), "utf8");
+
+  const report = await buildReadinessReport(root);
+  const superiority = report.productGoals.find((goal) => goal.id === "outcome-superiority");
+  assert.equal(superiority?.realEvidence.some((item) => item.id === "comparative.claude.present"), true);
+  assert.equal(superiority?.realEvidence.some((item) => item.id === "comparative.codex.present"), true);
+  assert.equal(superiority?.realEvidence.some((item) => item.id === "comparative.outcomes"), true);
+  assert.equal(superiority?.missingEvidence.some((item) => item.id === "comparative.claude.missing"), false);
+  assert.equal(superiority?.missingEvidence.some((item) => item.id === "comparative.codex.missing"), false);
+  assert.equal(superiority?.missingEvidence.some((item) => item.id === "comparative.baselines.missing"), false);
+});
+
 test("outcome-superiority real evidence contains only real evidence items", async () => {
   const root = await mkdtemp(join(tmpdir(), "openmythos-readiness-evidence-"));
   await mkdir(resolve(root, "src/core"), { recursive: true });

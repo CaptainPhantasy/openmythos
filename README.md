@@ -398,3 +398,15 @@ npm run check
 ## License
 
 MIT. See `LICENSE`.
+Manage git lifecycle directly from the CLI:
+
+```bash
+node dist/index.js branch --list --workdir .
+node dist/index.js stage --workdir . file1.ts file2.ts
+node dist/index.js commit --message "work-item update" --workdir .
+node dist/index.js rollback --workdir . --force --hard
+node dist/index.js publish-pr --title "Update" --workdir .
+node dist/index.js release-check --workdir .
+```
+
+Release checks are also available as `npm run cli -- release-check` after build.

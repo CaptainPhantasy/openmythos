@@ -2,6 +2,24 @@
 
 ## Session: 2026-06-14
 
+### Phase 4: Expand Real Worker Actions
+
+- **Status:** in progress
+- **Started:** 2026-06-14
+- Actions taken:
+  - Added `branch`, `stage`, `commit`, `rollback`, `publish-pr`, and `release-check` CLI commands for repo lifecycle operations.
+  - Updated readiness to detect repo-lifecycle command presence and report it as real product evidence only when all required commands are present.
+  - Hardened `outcome-superiority` evidence classification so comparative baseline artifacts are real evidence and missing baseline paths remain explicit missing evidence.
+  - Added readiness regression tests for repo lifecycle command coverage and comparative-baseline evidence assertions.
+  - Ran full TypeScript build and full test suite; all tests pass after changes.
+- Files created/modified:
+  - `src/core/readiness.ts`
+  - `src/ui/cli.ts`
+  - `src/test/readiness.test.ts`
+  - `.planning/2026-06-14-real-evidence-recovery/task_plan.md`
+  - `.planning/2026-06-14-real-evidence-recovery/progress.md`
+
+
 ### Phase 1: Evidence Inventory And Classification
 
 - **Status:** complete
