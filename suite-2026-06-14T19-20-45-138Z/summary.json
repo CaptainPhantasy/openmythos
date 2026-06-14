@@ -1,0 +1,189 @@
+{
+  "schemaVersion": "real-eval.v1",
+  "evidenceLevel": "real",
+  "mode": "suite",
+  "suiteId": "daily-workflow-suite",
+  "suiteName": "OpenMythos Daily Workflow Suite",
+  "suiteDescription": "Two deterministic repo tasks that require real edits, test updates, and proof of evidence",
+  "modelBindings": [
+    {
+      "role": "planner",
+      "adapter": "zai-coding",
+      "model": "glm-5.1",
+      "endpoint": "https://api.z.ai/api/coding/paas/v4",
+      "apiKeyEnv": "ZAI_API_KEY"
+    },
+    {
+      "role": "compressor",
+      "adapter": "zai-coding",
+      "model": "glm-5.1",
+      "endpoint": "https://api.z.ai/api/coding/paas/v4",
+      "apiKeyEnv": "ZAI_API_KEY"
+    },
+    {
+      "role": "coder",
+      "adapter": "zai-coding",
+      "model": "glm-5.1",
+      "endpoint": "https://api.z.ai/api/coding/paas/v4",
+      "apiKeyEnv": "ZAI_API_KEY"
+    },
+    {
+      "role": "critic",
+      "adapter": "zai-coding",
+      "model": "glm-5.1",
+      "endpoint": "https://api.z.ai/api/coding/paas/v4",
+      "apiKeyEnv": "ZAI_API_KEY"
+    },
+    {
+      "role": "verifier",
+      "adapter": "zai-coding",
+      "model": "glm-5.1",
+      "endpoint": "https://api.z.ai/api/coding/paas/v4",
+      "apiKeyEnv": "ZAI_API_KEY"
+    }
+  ],
+  "passed": false,
+  "requiredConsecutiveRounds": 2,
+  "successfulConsecutiveRounds": 0,
+  "profile": null,
+  "requestedFixtures": 2,
+  "requestedRounds": 2,
+  "fixtures": [
+    {
+      "fixture": "noop-js",
+      "goal": "Fix src/noop.js so echoOrFallback returns the provided non-empty string and returns \"fallback\" only when the input is blank. Do not create marker files or unrelated outputs. Keep tests passing.",
+      "modelBindings": [
+        {
+          "role": "planner",
+          "adapter": "zai-coding",
+          "model": "glm-5.1",
+          "endpoint": "https://api.z.ai/api/coding/paas/v4",
+          "apiKeyEnv": "ZAI_API_KEY"
+        },
+        {
+          "role": "compressor",
+          "adapter": "zai-coding",
+          "model": "glm-5.1",
+          "endpoint": "https://api.z.ai/api/coding/paas/v4",
+          "apiKeyEnv": "ZAI_API_KEY"
+        },
+        {
+          "role": "coder",
+          "adapter": "zai-coding",
+          "model": "glm-5.1",
+          "endpoint": "https://api.z.ai/api/coding/paas/v4",
+          "apiKeyEnv": "ZAI_API_KEY"
+        },
+        {
+          "role": "critic",
+          "adapter": "zai-coding",
+          "model": "glm-5.1",
+          "endpoint": "https://api.z.ai/api/coding/paas/v4",
+          "apiKeyEnv": "ZAI_API_KEY"
+        },
+        {
+          "role": "verifier",
+          "adapter": "zai-coding",
+          "model": "glm-5.1",
+          "endpoint": "https://api.z.ai/api/coding/paas/v4",
+          "apiKeyEnv": "ZAI_API_KEY"
+        }
+      ],
+      "rounds": 1,
+      "requestedRounds": 1,
+      "passed": false,
+      "successfulConsecutiveRounds": 0,
+      "results": [
+        {
+          "round": 1,
+          "status": "failed",
+          "repoDir": "/Volumes/Storage/OpenMythos/suite-2026-06-14T19-20-45-138Z/fixture-noop-js/round-01/repo",
+          "runDir": "/Volumes/Storage/OpenMythos/suite-2026-06-14T19-20-45-138Z/fixture-noop-js/round-01/repo",
+          "changedFiles": [],
+          "passed": false,
+          "expectedChangedFilesSatisfied": false,
+          "prohibitedArtifactsDetected": [],
+          "diffStat": "",
+          "runArtifacts": [],
+          "verificationResults": [],
+          "failures": [
+            "Missing required environment variable: ZAI_API_KEY"
+          ],
+          "error": "Missing required environment variable: ZAI_API_KEY"
+        }
+      ]
+    },
+    {
+      "fixture": "trim-js",
+      "goal": "Fix src/trim.js so trimOrEmpty trims every item and only converts null/undefined values to empty strings without mutating number inputs.",
+      "modelBindings": [
+        {
+          "role": "planner",
+          "adapter": "zai-coding",
+          "model": "glm-5.1",
+          "endpoint": "https://api.z.ai/api/coding/paas/v4",
+          "apiKeyEnv": "ZAI_API_KEY"
+        },
+        {
+          "role": "compressor",
+          "adapter": "zai-coding",
+          "model": "glm-5.1",
+          "endpoint": "https://api.z.ai/api/coding/paas/v4",
+          "apiKeyEnv": "ZAI_API_KEY"
+        },
+        {
+          "role": "coder",
+          "adapter": "zai-coding",
+          "model": "glm-5.1",
+          "endpoint": "https://api.z.ai/api/coding/paas/v4",
+          "apiKeyEnv": "ZAI_API_KEY"
+        },
+        {
+          "role": "critic",
+          "adapter": "zai-coding",
+          "model": "glm-5.1",
+          "endpoint": "https://api.z.ai/api/coding/paas/v4",
+          "apiKeyEnv": "ZAI_API_KEY"
+        },
+        {
+          "role": "verifier",
+          "adapter": "zai-coding",
+          "model": "glm-5.1",
+          "endpoint": "https://api.z.ai/api/coding/paas/v4",
+          "apiKeyEnv": "ZAI_API_KEY"
+        }
+      ],
+      "rounds": 1,
+      "requestedRounds": 1,
+      "passed": false,
+      "successfulConsecutiveRounds": 0,
+      "results": [
+        {
+          "round": 1,
+          "status": "failed",
+          "repoDir": "/Volumes/Storage/OpenMythos/suite-2026-06-14T19-20-45-138Z/fixture-trim-js/round-01/repo",
+          "runDir": "/Volumes/Storage/OpenMythos/suite-2026-06-14T19-20-45-138Z/fixture-trim-js/round-01/repo",
+          "changedFiles": [],
+          "passed": false,
+          "expectedChangedFilesSatisfied": false,
+          "prohibitedArtifactsDetected": [],
+          "diffStat": "",
+          "runArtifacts": [],
+          "verificationResults": [],
+          "failures": [
+            "Missing required environment variable: ZAI_API_KEY"
+          ],
+          "error": "Missing required environment variable: ZAI_API_KEY"
+        }
+      ]
+    }
+  ],
+  "scoring": {
+    "fixtureCount": 2,
+    "passedFixtureCount": 0,
+    "completedFixtureCount": 2
+  },
+  "evalRoot": "/Volumes/Storage/OpenMythos/suite-2026-06-14T19-20-45-138Z",
+  "startedAt": "2026-06-14T19:20:45.136Z",
+  "finishedAt": "2026-06-14T19:20:51.299Z"
+}

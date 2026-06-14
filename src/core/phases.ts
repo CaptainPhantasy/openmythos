@@ -112,10 +112,26 @@ export class PhaseExecutor {
     planned = await this.callJson("planner", "plan", buildPlanRequest(`Tooling corrections required:\n${toolRepairNotes}\nUse only supported tool ids, and make them compatible with the task role.`), planSchema) as Plan;
     normalized = normalizePlanTools(planned);
     if (normalized.issues.length > 0) {
+      const roleRepairedPlan = this.repairHarnessTaskRoles(normalized.plan);
+      const roleRepairedNormalized = normalizePlanTools(roleRepairedPlan);
+      if (roleRepairedNormalized.issues.length === 0) {
+        return roleRepairedNormalized.plan;
+      }
       throw new Error(`Plan referenced unsupported or mismatched tools after repair:\n${summarizeToolValidationIssues(normalized.issues)}`);
     }
 
     return normalized.plan;
+  }
+
+  private repairHarnessTaskRoles(plan: Plan): Plan {
+    const repairedTasks = plan.tasks.map((task) => task.executor === "harness" && task.role !== "verifier"
+      ? { ...task, role: "verifier" as const }
+      : task
+    );
+    return {
+      ...plan,
+      tasks: repairedTasks
+    };
   }
 
   async execute(plan: Plan, context: ContextResult, intake?: IntakeResult, bypassReviewBlocking = false): Promise<TaskOutput[]> {
@@ -380,7 +396,7 @@ export class PhaseExecutor {
   ): Promise<{
     output: TaskOutput;
     executorKind: PlanTask["executor"];
-    executorRole: Extract<PlanTask["role"], "coder" | "critic" | "verifier">;
+    executorRole: PlanTask["role"];
     toolTurnCount: number;
     toolCallCount: number;
     observations: TaskObservation[];
@@ -488,7 +504,7 @@ export class PhaseExecutor {
     output: TaskOutput,
     review: ReviewBundle,
     executorKind: PlanTask["executor"],
-    executorRole: Extract<PlanTask["role"], "coder" | "critic" | "verifier">,
+    executorRole: PlanTask["role"],
     toolTurnCount: number,
     toolCallCount: number,
     observations: TaskObservation[],
@@ -687,7 +703,10 @@ export class PhaseExecutor {
     toolObservations: TaskObservation[];
     artifactPath: string | null;
   }> {
-    const role = task.role;
+    const taskRole = task.role;
+    const role = taskRole === "researcher" ? "planner" as const
+      : taskRole === "tester" || taskRole === "refactorer" || taskRole === "documenter" ? "coder" as const
+      : taskRole;
     const model = this.config.models[role];
     const currentFileState = await this.readCurrentFileState(task);
     const snippets = Object.entries(taskSnippets)

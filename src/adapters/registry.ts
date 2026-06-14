@@ -9,7 +9,8 @@ export class AdapterRegistry {
   private readonly adapters = new Map<ModelRole, ModelAdapter>();
 
   constructor(config: OpenMythosConfig) {
-    for (const role of Object.keys(config.models) as ModelRole[]) {
+    const modelKeys = Object.keys(config.models) as Array<keyof typeof config.models>;
+    for (const role of modelKeys) {
       this.adapters.set(role, this.createAdapter(config.models[role]));
     }
   }

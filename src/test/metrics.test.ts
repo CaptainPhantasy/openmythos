@@ -86,6 +86,46 @@ test("summarizeBench aggregates retained run metrics", () => {
   assert.equal(summary.totalTaskVerificationFailures, 1);
 });
 
+test("summarizeBench treats missing legacy metric fields as zero instead of NaN", () => {
+  const metrics = [{
+    runId: "legacy-run",
+    goal: "legacy goal",
+    status: "completed",
+    startedAt: "2026-06-14T00:00:00.000Z",
+    completedAt: "2026-06-14T00:00:01.000Z",
+    totalDurationMs: 1000,
+    retryCount: 0,
+    phaseCount: 4,
+    contextFileCount: 1,
+    taskCount: 1,
+    modelTaskCount: undefined,
+    harnessTaskCount: undefined,
+    modelToolTurnCount: undefined,
+    modelToolCallCount: undefined,
+    fileEditCount: 1,
+    patchEditCount: undefined,
+    deleteEditCount: 0,
+    highRiskReviewCount: 0,
+    blockingReviewCount: 0,
+    localVerificationCount: 0,
+    localVerificationFailureCount: 0,
+    taskVerificationCount: undefined,
+    taskVerificationFailureCount: undefined,
+    qaPassed: true,
+    qaScore: 100,
+    modelUsage: []
+  }] as unknown as RunMetrics[];
+
+  const summary = summarizeBench(metrics);
+  assert.equal(summary.totalModelTaskCount, 0);
+  assert.equal(summary.totalHarnessTaskCount, 0);
+  assert.equal(summary.totalModelToolTurnCount, 0);
+  assert.equal(summary.totalModelToolCallCount, 0);
+  assert.equal(summary.totalPatchEdits, 0);
+  assert.equal(summary.totalTaskVerificationCount, 0);
+  assert.equal(summary.totalTaskVerificationFailures, 0);
+});
+
 test("collectRunMetrics finds metrics artifacts under eval-style nested roots", async () => {
   const root = await mkdtemp(join(tmpdir(), "openmythos-bench-"));
   const runRoot = resolve(root, "eval-1", "round-01", "runs", "run-1");

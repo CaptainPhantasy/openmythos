@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { access } from "node:fs/promises";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -65,4 +66,15 @@ test("assessRealEvalFixture fails until the expected source file is changed", as
   assert.equal(passing.expectedChangedFilesSatisfied, true);
   assert.equal(passing.verificationResults[0]?.exitCode, 0);
   assert.deepEqual(passing.prohibitedArtifactsDetected, []);
+});
+
+test("copyRealEvalFixture copies active harness config into fixture repos when requested", async () => {
+  const root = await mkdtemp(join(tmpdir(), "openmythos-real-eval-config-"));
+  const repoDir = resolve(root, "repo");
+  const configPath = resolve(process.cwd(), "openmythos.config.json");
+
+  const fixture = await copyRealEvalFixture("noop-js", repoDir, configPath);
+  assert.equal(fixture.id, "noop-js");
+
+  await access(resolve(repoDir, "openmythos.config.json"));
 });

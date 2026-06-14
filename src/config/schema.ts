@@ -5,7 +5,11 @@ export const modelRoleSchema = z.enum([
   "compressor",
   "coder",
   "critic",
-  "verifier"
+  "verifier",
+  "researcher",
+  "tester",
+  "refactorer",
+  "documenter"
 ]);
 
 export type ModelRole = z.infer<typeof modelRoleSchema>;
@@ -130,7 +134,38 @@ export const openMythosConfigSchema = z.object({
     presets: verificationPresetsSchema
   }).default({}),
   approval: approvalConfigSchema,
-  governance: governanceConfigSchema
+  governance: governanceConfigSchema,
+  routing: z.object({
+    policies: z.array(z.object({
+      taskType: z.string(),
+      preferredRole: z.string(),
+      fallbackRole: z.string().optional(),
+      maxLatencyMs: z.number().optional(),
+      maxCostCents: z.number().optional(),
+    })).default([]),
+    defaultComplexityThreshold: z.object({
+      trivial: z.number().default(50),
+      standard: z.number().default(500),
+      complex: z.number().default(2000),
+    }).default({}),
+  }).default({}),
+  memory: z.object({
+    enabled: z.boolean().default(true),
+    persistNotes: z.boolean().default(true),
+    persistDecisions: z.boolean().default(true),
+    maxNotes: z.number().default(100),
+  }).default({}),
+  worktree: z.object({
+    enabled: z.boolean().default(false),
+    autoCleanup: z.boolean().default(true),
+    basePath: z.string().default(".openmythos/worktrees"),
+  }).default({}),
+  guardrails: z.object({
+    secretScan: z.boolean().default(true),
+    dependencyAudit: z.boolean().default(true),
+    destructiveBlock: z.boolean().default(true),
+    customSecretPatterns: z.array(z.string()).default([]),
+  }).default({})
 });
 
 export type OpenMythosConfig = z.infer<typeof openMythosConfigSchema>;

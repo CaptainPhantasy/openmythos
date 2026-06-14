@@ -1,0 +1,193 @@
+{
+  "models": {
+    "planner": {
+      "adapter": "zai-coding",
+      "model": "glm-5.1",
+      "maxTokens": 8192,
+      "temperature": 0.2,
+      "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+      "apiKeyEnv": "ZAI_API_KEY",
+      "thinking": {
+        "type": "enabled",
+        "clearThinking": true
+      },
+      "rateLimit": {
+        "requestsPerMinute": 10
+      }
+    },
+    "compressor": {
+      "adapter": "zai-coding",
+      "model": "glm-5.1",
+      "maxTokens": 4096,
+      "temperature": 0.1,
+      "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+      "apiKeyEnv": "ZAI_API_KEY",
+      "thinking": {
+        "type": "enabled",
+        "clearThinking": true
+      },
+      "rateLimit": {
+        "requestsPerMinute": 10
+      }
+    },
+    "coder": {
+      "adapter": "zai-coding",
+      "model": "glm-5.1",
+      "maxTokens": 16384,
+      "temperature": 0.3,
+      "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+      "apiKeyEnv": "ZAI_API_KEY",
+      "thinking": {
+        "type": "enabled",
+        "clearThinking": true
+      },
+      "rateLimit": {
+        "requestsPerMinute": 10
+      }
+    },
+    "critic": {
+      "adapter": "zai-coding",
+      "model": "glm-5.1",
+      "maxTokens": 8192,
+      "temperature": 0.2,
+      "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+      "apiKeyEnv": "ZAI_API_KEY",
+      "thinking": {
+        "type": "enabled",
+        "clearThinking": true
+      },
+      "rateLimit": {
+        "requestsPerMinute": 10
+      }
+    },
+    "verifier": {
+      "adapter": "zai-coding",
+      "model": "glm-5.1",
+      "maxTokens": 4096,
+      "temperature": 0.1,
+      "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+      "apiKeyEnv": "ZAI_API_KEY",
+      "thinking": {
+        "type": "enabled",
+        "clearThinking": true
+      },
+      "rateLimit": {
+        "requestsPerMinute": 10
+      }
+    }
+  },
+  "execution": {
+    "maxRetries": 3,
+    "maxTaskToolTurns": 3,
+    "timeoutMs": 120000,
+    "workingDirectory": "."
+  },
+  "context": {
+    "maxFiles": 80,
+    "maxFileSizeBytes": 120000,
+    "ignorePatterns": [
+      "node_modules",
+      ".git",
+      "dist",
+      "build",
+      ".next",
+      "__pycache__",
+      ".venv",
+      "runs"
+    ],
+    "ignoreExtensions": [
+      ".png",
+      ".jpg",
+      ".jpeg",
+      ".gif",
+      ".bmp",
+      ".ico",
+      ".woff",
+      ".woff2",
+      ".ttf",
+      ".eot",
+      ".mp3",
+      ".mp4",
+      ".wav",
+      ".avi",
+      ".mov",
+      ".zip",
+      ".tar",
+      ".gz",
+      ".rar",
+      ".7z",
+      ".pdf",
+      ".doc",
+      ".docx",
+      ".xls",
+      ".xlsx",
+      ".sqlite",
+      ".db"
+    ]
+  },
+  "verification": {
+    "localCommands": [
+      "npm run build"
+    ],
+    "requireLocalPassBeforeModelQa": true,
+    "presets": {
+      "default": [
+        "npm run build"
+      ],
+      "byTaskType": {
+        "lint": [
+          "npm run --if-present lint"
+        ],
+        "build": [
+          "npm run --if-present build"
+        ],
+        "test": [
+          "npm run --if-present test"
+        ],
+        "browser": [
+          "npm run --if-present test"
+        ],
+        "api": [
+          "npm run --if-present test"
+        ],
+        "database": [
+          "npm run --if-present test"
+        ],
+        "security": [
+          "npm run --if-present audit"
+        ],
+        "performance": [
+          "npm run --if-present build"
+        ]
+      },
+      "byRisk": {
+        "low": [],
+        "medium": [
+          "npm run --if-present test"
+        ],
+        "high": [
+          "npm run --if-present test",
+          "npm run --if-present build"
+        ]
+      }
+    }
+  },
+  "approval": {
+    "mode": "suggest",
+    "protectedPaths": [
+      ".env*",
+      "openmythos.config.json",
+      "profiles/*.json"
+    ]
+  },
+  "governance": {
+    "requireGitRepo": false,
+    "dirtyWorktree": "warn",
+    "protectedBranchMode": "warn",
+    "protectedBranches": [
+      "main",
+      "master",
+      "release/*"
+    ]
+  }
+}

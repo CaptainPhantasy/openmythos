@@ -13,9 +13,14 @@ import type { ContextResult, IntakeResult, IssueContext, Plan, PullRequestContex
 
 export interface RunResult {
   runId: string;
-  status: "completed" | "failed" | "awaiting_approval" | "running";
+  status: "queued" | "completed" | "failed" | "awaiting_approval" | "running";
   finalOutput: string | null;
   artifacts: string[];
+}
+
+export interface StartedRun {
+  runId: string;
+  result: Promise<RunResult>;
 }
 
 export class Runner {
@@ -26,10 +31,18 @@ export class Runner {
   ) {}
 
   async run(goal: string): Promise<RunResult> {
+    const started = await this.start(goal);
+    return started.result;
+  }
+
+  async start(goal: string): Promise<StartedRun> {
     const governance = await evaluateGovernance(this.config, this.workdir);
     const runId = randomUUID();
     await this.store.createRun(runId, goal, this.config.execution.maxRetries);
-    return this.executeFrom(runId, goal, governance);
+    return {
+      runId,
+      result: this.executeFrom(runId, goal, governance)
+    };
   }
 
   async runFromIssue(issue: IssueContext, goal: string): Promise<RunResult> {
@@ -61,21 +74,14 @@ export class Runner {
       throw new Error(`Run not found: ${runId}`);
     }
     if (state.status === "completed") {
-      return {
-        runId,
-        status: "completed",
-        finalOutput: state.finalOutput,
-        artifacts: await this.artifacts(runId)
-      };
+      return this.inspect(runId);
     }
     if (state.status === "awaiting_approval" && state.approved !== true) {
       await this.store.updatePhase(runId, state.currentPhase);
-      return {
-        runId,
-        status: "awaiting_approval",
-        finalOutput: state.finalOutput,
-        artifacts: await this.artifacts(runId)
-      };
+      return this.inspect(runId);
+    }
+    if (state.status === "queued") {
+      await this.store.startQueuedRun(runId);
     }
     return this.executeFrom(runId, state.goal, undefined, state.approved === true);
   }
@@ -85,8 +91,22 @@ export class Runner {
     return this.resume(runId);
   }
 
+  async inspect(runId: string): Promise<RunResult> {
+    const state = await this.store.loadRun(runId);
+    if (!state) {
+      throw new Error(`Run not found: ${runId}`);
+    }
+    return {
+      runId,
+      status: state.status,
+      finalOutput: state.finalOutput,
+      artifacts: await this.artifacts(runId)
+    };
+  }
+
   async reject(runId: string, reason: string): Promise<RunResult> {
     const state = await this.store.reject(runId, reason);
+    await this.syncStoredMetricsState(runId, state);
     return {
       runId,
       status: "failed",
@@ -97,6 +117,7 @@ export class Runner {
 
   async cancel(runId: string, reason: string): Promise<RunResult> {
     const state = await this.store.fail(runId, reason);
+    await this.syncStoredMetricsState(runId, state);
     return {
       runId,
       status: "failed",
@@ -107,9 +128,10 @@ export class Runner {
 
   async queue(runId: string): Promise<RunResult> {
     const state = await this.store.queue(runId);
+    await this.syncStoredMetricsState(runId, state);
     return {
       runId,
-      status: "running",
+      status: "queued",
       finalOutput: state.finalOutput,
       artifacts: await this.artifacts(runId)
     };
@@ -117,11 +139,7 @@ export class Runner {
 
   async replay(runId: string): Promise<RunResult> {
     await this.queue(runId);
-    const state = await this.store.loadRun(runId);
-    if (!state) {
-      throw new Error(`Run not found: ${runId}`);
-    }
-    return this.executeFrom(runId, state.goal);
+    return this.resume(runId);
   }
 
   private async executeFrom(
@@ -377,5 +395,28 @@ export class Runner {
       verification: executor.verificationMetrics(),
       modelUsage: executor.snapshotModelUsage()
     }));
+  }
+
+  private async syncStoredMetricsState(runId: string, state: { status: RunResult["status"]; startedAt: string; completedAt: string | null; retryCount: number; phasesCompleted: string[] }): Promise<void> {
+    const metrics = await this.store.readArtifact<Record<string, unknown>>(runId, "metrics.json");
+    if (!metrics) {
+      return;
+    }
+
+    const completedAt = state.completedAt;
+    const totalDurationMs = Math.max(
+      0,
+      Date.parse(completedAt ?? new Date().toISOString()) - Date.parse(state.startedAt)
+    );
+
+    await this.store.writeArtifact(runId, "metrics.json", {
+      ...metrics,
+      status: state.status,
+      startedAt: state.startedAt,
+      completedAt,
+      retryCount: state.retryCount,
+      phaseCount: state.phasesCompleted.length,
+      totalDurationMs
+    });
   }
 }

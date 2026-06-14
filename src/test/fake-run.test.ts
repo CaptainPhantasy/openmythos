@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
-import { mkdtemp, readFile, mkdir, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdtemp, readFile, readdir, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 import { join, resolve } from "node:path";
@@ -46,6 +47,22 @@ test("Runner completes a full deterministic fake-adapter run", async () => {
   assert.ok(metrics.modelUsage.length > 0);
   assert.ok(metrics.modelUsage.some((entry) => entry.role === "planner" && entry.calls >= 1));
   assert.ok(result.artifacts.some((artifact) => artifact.endsWith("issue.json")) === false);
+});
+
+test("Runner.start returns a live run handle before awaiting completion", async () => {
+  const workdir = await mkdtemp(join(tmpdir(), "openmythos-fake-start-"));
+  const config = await loadConfigWithOptionalProfile(resolve("openmythos.config.json"), "fake");
+  const store = new StateStore(resolve(workdir, "runs"));
+  const runner = new Runner(config, store, workdir);
+
+  const started = await runner.start("fake run");
+  const initialState = JSON.parse(await readFile(resolve(workdir, "runs", started.runId, "state.json"), "utf8")) as { status: string };
+  const result = await started.result;
+
+  assert.ok(started.runId.length > 0);
+  assert.ok(["running", "completed"].includes(initialState.status));
+  assert.equal(result.runId, started.runId);
+  assert.equal(result.status, "completed");
 });
 
 test("Runner fails when task-level verification commands fail", async () => {
@@ -228,6 +245,26 @@ test("Runner can stop before high-risk model tool operations", async () => {
   assert.ok(events.some((event) => event.action === "tool_approval_required"));
   await assert.rejects(() => readFile(resolve(workdir, "openmythos-fake-output.txt"), "utf8"));
   assert.ok(runArtifacts.some((name) => name.startsWith("tool-approval-task-1-")));
+});
+
+test("Runner.inspect reflects the latest state after approval resumes a paused run", async () => {
+  const workdir = await mkdtemp(join(tmpdir(), "openmythos-fake-inspect-"));
+  const config = await loadConfigWithOptionalProfile(resolve("openmythos.config.json"), "fake");
+  config.approval.mode = "enforce";
+  config.approval.protectedPaths = ["openmythos-fake-output.txt"];
+
+  const runner = new Runner(config, new StateStore(resolve(workdir, "runs")), workdir);
+  const initialResult = await runner.run("fake run requiring approval");
+  const paused = await runner.inspect(initialResult.runId);
+  const approved = await runner.approve(initialResult.runId);
+  const completed = await runner.inspect(initialResult.runId);
+
+  assert.equal(initialResult.status, "awaiting_approval");
+  assert.equal(paused.status, "awaiting_approval");
+  assert.equal(approved.status, "completed");
+  assert.equal(completed.status, "completed");
+  assert.match(completed.finalOutput ?? "", /OpenMythos Execution Report/);
+  assert.ok(completed.artifacts.some((artifact) => artifact.endsWith("final.md")));
 });
 
 test("Runner retains task-scoped retrieval observations for model tasks", async () => {
@@ -430,27 +467,39 @@ test("Runner cancel and reject commands mark runs as failed", async () => {
   const cancelWorkdir = await mkdtemp(join(tmpdir(), "openmythos-fake-cancel-"));
   const rejectWorkdir = await mkdtemp(join(tmpdir(), "openmythos-fake-reject-"));
   const config = await loadConfigWithOptionalProfile(resolve("openmythos.config.json"), "fake");
+  config.approval.mode = "enforce";
+  config.approval.protectedPaths = ["openmythos-fake-output.txt"];
   const cancelRunner = new Runner(config, new StateStore(resolve(cancelWorkdir, "runs")), cancelWorkdir);
   const rejectRunner = new Runner(config, new StateStore(resolve(rejectWorkdir, "runs")), rejectWorkdir);
 
-  const cancelState = await cancelRunner.run("fake run");
+  const cancelState = await cancelRunner.run("fake run requiring approval");
+  assert.equal(cancelState.status, "awaiting_approval");
   const canceled = await cancelRunner.cancel(cancelState.runId, "manual cancel");
   assert.equal(canceled.status, "failed");
   const cancelStateAfter = JSON.parse(await readFile(resolve(cancelWorkdir, "runs", canceled.runId, "state.json"), "utf8")) as {
     status: string;
     error: string | null;
   };
+  const cancelMetricsAfter = JSON.parse(await readFile(resolve(cancelWorkdir, "runs", canceled.runId, "metrics.json"), "utf8")) as {
+    status: string;
+  };
   assert.equal(cancelStateAfter.status, "failed");
+  assert.equal(cancelMetricsAfter.status, "failed");
   assert.match(cancelStateAfter.error ?? "", /manual cancel/);
 
   const rejectState = await rejectRunner.run("fake run requiring approval");
+  assert.equal(rejectState.status, "awaiting_approval");
   const rejected = await rejectRunner.reject(rejectState.runId, "manual reject");
   assert.equal(rejected.status, "failed");
   const rejectStateAfter = JSON.parse(await readFile(resolve(rejectWorkdir, "runs", rejected.runId, "state.json"), "utf8")) as {
     status: string;
     error: string | null;
   };
+  const rejectMetricsAfter = JSON.parse(await readFile(resolve(rejectWorkdir, "runs", rejected.runId, "metrics.json"), "utf8")) as {
+    status: string;
+  };
   assert.equal(rejectStateAfter.status, "failed");
+  assert.equal(rejectMetricsAfter.status, "failed");
   assert.match(rejectStateAfter.error ?? "", /manual reject/);
 });
 
@@ -458,18 +507,29 @@ test("Runner queue and replay commands remain executable from completed runs", a
   const workdir = await mkdtemp(join(tmpdir(), "openmythos-fake-queue-replay-"));
   const config = await loadConfigWithOptionalProfile(resolve("openmythos.config.json"), "fake");
   const runner = new Runner(config, new StateStore(resolve(workdir, "runs")), workdir);
+  const runDir = resolve(workdir, "runs");
 
   const completed = await runner.run("fake run");
   assert.equal(completed.status, "completed");
 
   const queued = await runner.queue(completed.runId);
-  assert.equal(queued.status, "running");
-  const queuedState = JSON.parse(await readFile(resolve(workdir, "runs", completed.runId, "state.json"), "utf8")) as { status: string };
-  assert.equal(queuedState.status, "running");
+  assert.equal(queued.status, "queued");
+  const queuedState = JSON.parse(await readFile(resolve(runDir, completed.runId, "state.json"), "utf8")) as {
+    status: string;
+    completedAt: string | null;
+    finalOutput: string | null;
+  };
+  assert.equal(queuedState.status, "queued");
+  assert.equal(queuedState.completedAt, null);
+  assert.equal(queuedState.finalOutput, null);
+  assert.equal(existsSync(resolve(runDir, completed.runId, "metrics.json")), false);
+  assert.equal(existsSync(resolve(runDir, completed.runId, "execution.json")), false);
+  const historyEntries = await readdir(resolve(runDir, completed.runId, ".history"));
+  assert.equal(historyEntries.length, 1);
 
   const replayed = await runner.replay(completed.runId);
   assert.equal(replayed.status, "completed");
-  const replayState = JSON.parse(await readFile(resolve(workdir, "runs", completed.runId, "state.json"), "utf8")) as { status: string };
+  const replayState = JSON.parse(await readFile(resolve(runDir, completed.runId, "state.json"), "utf8")) as { status: string };
   assert.equal(replayState.status, "completed");
 });
 

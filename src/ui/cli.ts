@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { existsSync } from "node:fs";
 import { cp, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
+import { discoverConfigPath, formatConfigDiscoveryFailure } from "../config/discovery.js";
 import { loadConfigWithOptionalProfile } from "../config/profile.js";
 import { resolveIssueSource } from "../core/issues.js";
 import { collectRunMetrics, summarizeBench } from "../core/metrics.js";
@@ -26,6 +27,10 @@ import { Runner } from "../core/runner.js";
 import { StateStore } from "../state/store.js";
 import { executeCommand, executeShell } from "../tools/shell.js";
 import { runTui } from "./tui.js";
+import { loadMemory, addNote, searchMemory, clearMemory, addDecision } from "../core/memory.js";
+import { scanForSecrets, auditDependencies, assessCommandRisk, summarizeRisk } from "../core/guardrails.js";
+import { explainPlan, explainVerification, formatExplanation } from "../core/explanation.js";
+import { defaultRoutingPolicies, routeModel, classifyComplexity, classifyRisk } from "../core/model-routing.js";
 
 export function buildCli(): Command {
   const program = new Command();
@@ -62,12 +67,33 @@ export function buildCli(): Command {
       }
     ) => {
       const { runner, store } = await runtime(options.config, options.workdir, options.profile);
+      if (options.tui) {
+        const started = await runner.start(goal);
+        let settledError: Error | null = null;
+        void started.result.catch((error: Error) => {
+          settledError = error;
+        });
+
+        await runTui(store, {
+          watchedRunId: started.runId,
+          blockExitWhileActive: true,
+          controls: runner
+        });
+
+        if (settledError) {
+          throw settledError;
+        }
+
+        const result = await runner.inspect(started.runId);
+        console.log(JSON.stringify(result, null, 2));
+        if (result.status !== "completed" && result.status !== "awaiting_approval") {
+          process.exitCode = 1;
+        }
+        return;
+      }
+
       const result = await runner.run(goal);
       console.log(JSON.stringify(result, null, 2));
-
-      if (options.tui) {
-        await runTui(store, false);
-      }
       if (result.status !== "completed" && result.status !== "awaiting_approval") {
         process.exitCode = 1;
       }
@@ -519,6 +545,7 @@ export function buildCli(): Command {
     .option("-g, --goal <goal>", "Evaluation goal", "deterministic fake eval round")
     .action(async (options: { config: string; profile: string; rounds: number; workdir: string; goal: string }) => {
       const evalRoot = resolve(options.workdir, `eval-${new Date().toISOString().replace(/[:.]/g, "-")}`);
+      const resolvedConfigPath = discoverConfigPath(options.config, options.workdir).path;
       await mkdir(evalRoot, { recursive: true });
       const results: Array<{ round: number; status: string; runId?: string; workdir: string; error?: string }> = [];
 
@@ -526,7 +553,7 @@ export function buildCli(): Command {
         const roundWorkdir = resolve(evalRoot, `round-${String(round).padStart(2, "0")}`);
         await mkdir(roundWorkdir, { recursive: true });
         try {
-          const { runner } = await runtime(options.config, roundWorkdir, options.profile);
+          const { runner } = await runtime(resolvedConfigPath, roundWorkdir, options.profile);
           const result = await runner.run(`${options.goal} ${round}`);
           results.push({ round, status: result.status, runId: result.runId, workdir: roundWorkdir });
           if (result.status !== "completed") {
@@ -567,11 +594,11 @@ export function buildCli(): Command {
     .option("-g, --goal <goal>", "Override the fixture goal")
     .action(async (options: { config: string; profile?: string; fixture: string; rounds: number; workdir: string; goal?: string }) => {
       await runLiveEvalCommand({
-        config: options.config,
+        config: discoverConfigPath(options.config, options.workdir).path,
         profile: options.profile,
         fixture: options.fixture,
         rounds: options.rounds,
-        workdir: options.workdir,
+        workdir: resolve(options.workdir),
         goal: options.goal
       });
     });
@@ -586,11 +613,11 @@ export function buildCli(): Command {
     .option("-g, --goal <goal>", "Override the fixture goal")
     .action(async (options: { config: string; profile?: string; fixture: string; rounds: number; workdir: string; goal?: string }) => {
       await runLiveEvalCommand({
-        config: options.config,
+        config: discoverConfigPath(options.config, options.workdir).path,
         profile: options.profile,
         fixture: options.fixture,
         rounds: options.rounds,
-        workdir: options.workdir,
+        workdir: resolve(options.workdir),
         goal: options.goal
       });
     });
@@ -604,7 +631,9 @@ export function buildCli(): Command {
     .action(async (options: { config: string; profile?: string; suite: string; workdir: string }) => {
       const startedAt = new Date().toISOString();
       const suite = await loadRealEvalSuite(options.suite);
-      const evalRoot = resolve(options.workdir, `suite-${new Date().toISOString().replace(/[:.]/g, "-")}`);
+      const resolvedWorkdir = resolve(options.workdir);
+      const profileConfigPath = discoverConfigPath(options.config, resolvedWorkdir).path;
+      const evalRoot = resolve(resolvedWorkdir, `suite-${new Date().toISOString().replace(/[:.]/g, "-")}`);
       await mkdir(evalRoot, { recursive: true });
       await writeFile(resolve(evalRoot, "suite.json"), JSON.stringify(suite, null, 2));
 
@@ -615,7 +644,7 @@ export function buildCli(): Command {
           fixture,
           rounds: fixtureSpec.rounds,
           goal: fixtureSpec.goal ?? fixture.goal,
-          profileConfigPath: options.config,
+          profileConfigPath,
           profile: options.profile,
           baseDir: resolve(evalRoot, `fixture-${fixture.id}`)
         });
@@ -878,23 +907,137 @@ export function buildCli(): Command {
 
   program.command("tui")
     .description("Open a terminal dashboard for run state and events")
+    .option("-c, --config <path>", "Config file", "openmythos.config.json")
+    .option("-p, --profile <nameOrPath>", "Config profile overlay")
     .option("-w, --workdir <path>", "Target working directory", ".")
     .option("--once", "Render once and exit")
-    .action(async (options: { workdir: string; once?: boolean }) => {
-      const store = new StateStore(resolve(options.workdir, "runs"));
-      await runTui(store, Boolean(options.once));
+    .action(async (options: { config: string; profile?: string; workdir: string; once?: boolean }) => {
+      try {
+        const { store, runner } = await runtime(options.config, options.workdir, options.profile);
+        await runTui(store, {
+          once: Boolean(options.once),
+          controls: runner
+        });
+      } catch {
+        const store = new StateStore(resolve(options.workdir, "runs"));
+        await runTui(store, {
+          once: Boolean(options.once)
+        });
+      }
     });
 
+  program.command("memory")
+    .description("View, add, or search durable repository memory")
+    .argument("[action]", "list | add | search | clear | decision", "list")
+    .argument("[query]", "Search query or note text")
+    .option("-w, --workdir <path>", "Target working directory", ".")
+    .option("--tags <tags>", "Comma-separated tags for notes")
+    .action(async (action: string, query: string | undefined, options: { workdir: string; tags?: string }) => {
+      const workdir = resolve(options.workdir);
+      if (action === "list") {
+        const memory = await loadMemory(workdir);
+        console.log(JSON.stringify(memory, null, 2));
+      } else if (action === "add" && query) {
+        const tags = options.tags ? options.tags.split(",").map((t) => t.trim()) : [];
+        const note = await addNote(workdir, query, tags);
+        console.log(JSON.stringify({ status: "added", note }, null, 2));
+      } else if (action === "search" && query) {
+        const results = await searchMemory(workdir, query);
+        console.log(JSON.stringify(results, null, 2));
+      } else if (action === "decision" && query) {
+        const decision = await addDecision(workdir, query, query);
+        console.log(JSON.stringify({ status: "added", decision }, null, 2));
+      } else if (action === "clear") {
+        await clearMemory(workdir);
+        console.log(JSON.stringify({ status: "cleared" }, null, 2));
+      } else {
+        console.error("Usage: memory [list|add|search|clear|decision] [query]");
+        process.exitCode = 1;
+      }
+    });
+
+  program.command("scan")
+    .description("Run security, secret, and dependency guardrails on the repository")
+    .option("-w, --workdir <path>", "Target working directory", ".")
+    .option("--file <path>", "Scan a specific file for secrets")
+    .option("--command <cmd>", "Assess a command for destructive patterns")
+    .action(async (options: { workdir: string; file?: string; command?: string }) => {
+      const workdir = resolve(options.workdir);
+      const findings = [];
+      if (options.command) {
+        findings.push(...assessCommandRisk(options.command));
+      } else if (options.file) {
+        const { readFile } = await import("node:fs/promises");
+        const content = await readFile(resolve(workdir, options.file), "utf8");
+        findings.push(...scanForSecrets(content, options.file));
+      } else {
+        findings.push(...await auditDependencies(workdir));
+      }
+      const summary = summarizeRisk(findings);
+      console.log(JSON.stringify({ findings, summary }, null, 2));
+      if (summary.level === "dangerous") {
+        process.exitCode = 1;
+      }
+    });
+
+  program.command("explain")
+    .description("Explain a run's plan, routing decisions, and verification results")
+    .argument("[runId]", "Run id to explain")
+    .option("-c, --config <path>", "Config file", "openmythos.config.json")
+    .option("-w, --workdir <path>", "Target working directory", ".")
+    .action(async (runId: string | undefined, options: { config: string; workdir: string }) => {
+      const workdir = resolve(options.workdir);
+      if (!runId) {
+        const policies = defaultRoutingPolicies();
+        console.log(formatExplanation({
+          summary: "Default model routing policies:",
+          details: policies.map((p) => `${p.taskType}: ${p.preferredRole} (max cost: ${p.maxCostCents ?? "unlimited"}c, max latency: ${p.maxLatencyMs ?? "unlimited"}ms)`),
+        }));
+        return;
+      }
+      const store = new StateStore(resolve(workdir, "runs"));
+      const plan = await store.readArtifact<{ tasks: Array<{ id: string; role: string; description: string; tools: string[]; dependsOn?: string[] }>; successCriteria: string[] }>(runId, "plan.json");
+      if (plan) {
+        const explanation = explainPlan(plan);
+        console.log(formatExplanation(explanation));
+      } else {
+        console.log("No plan found for run " + runId);
+      }
+    });
+
+  program.command("onboard")
+    .description("First-run onboarding wizard for profiles, keys, and workspace binding")
+    .option("-w, --workdir <path>", "Target working directory", ".")
+    .action(async (options: { workdir: string }) => {
+      const workdir = resolve(options.workdir);
+      const configPath = discoverConfigPath("openmythos.config.json", workdir).path;
+      const report = await runSetupCheck({ workdir, configPath });
+      console.log(JSON.stringify({
+        step: "setup_check",
+        passed: report.passed,
+        errors: report.errors,
+        warnings: report.warnings,
+        recommendations: report.recommendations
+      }, null, 2));
+      if (!report.passed) {
+        console.log("\nOnboarding incomplete. Fix the errors above, then run again.");
+        process.exitCode = 1;
+      } else {
+        console.log("\nOnboarding complete. Try: openmythos run \"your goal\"");
+      }
+    });
   return program;
 }
 
 async function runtime(configPath: string, workdirPath: string, profile?: string): Promise<{ runner: Runner; store: StateStore; config: Awaited<ReturnType<typeof loadConfigWithOptionalProfile>> }> {
-  const configFile = resolve(configPath);
+  const resolvedWorkdir = resolve(workdirPath);
+  const configResolution = discoverConfigPath(configPath, resolvedWorkdir);
+  const configFile = configResolution.path;
   if (!existsSync(configFile)) {
-    throw new Error(`Config file not found: ${configFile}`);
+    throw new Error(formatConfigDiscoveryFailure(configResolution));
   }
   const config = await loadConfigWithOptionalProfile(configFile, profile);
-  const workdir = resolve(workdirPath || config.execution.workingDirectory);
+  const workdir = resolve(resolvedWorkdir || config.execution.workingDirectory);
   const store = new StateStore(resolve(workdir, "runs"));
   return { runner: new Runner(config, store, workdir), store, config };
 }
@@ -947,6 +1090,9 @@ async function findSummaryJson(root: string, maxDepth: number, currentDepth = 0)
     if (entry.isFile() && entry.name === "summary.json") {
       return path;
     }
+  }
+  for (const entry of entries) {
+    const path = resolve(root, entry.name);
     if (entry.isDirectory()) {
       const nested = await findSummaryJson(path, maxDepth, currentDepth + 1);
       if (nested) {
@@ -1044,7 +1190,7 @@ async function runRealEvalFixtureSuite(options: {
     const roundDir = resolve(options.baseDir, `round-${String(round).padStart(2, "0")}`);
     const repoDir = resolve(roundDir, "repo");
     await mkdir(roundDir, { recursive: true });
-    await copyRealEvalFixture(options.fixture.id, repoDir);
+    await copyRealEvalFixture(options.fixture.id, repoDir, options.profileConfigPath);
     try {
       const { config } = await runtime(options.profileConfigPath, repoDir, options.profile);
       if (usesFakeAdapter(config)) {
@@ -1130,6 +1276,7 @@ async function runLiveEvalCommand(options: {
   goal: string | undefined;
 }) {
   const fixture = await loadRealEvalFixture(options.fixture);
+  const resolvedProfileConfigPath = discoverConfigPath(options.config, options.workdir).path;
   const evalRoot = resolve(options.workdir, `eval-${new Date().toISOString().replace(/[:.]/g, "-")}`);
   await mkdir(evalRoot, { recursive: true });
   const startedAt = new Date().toISOString();
@@ -1137,7 +1284,7 @@ async function runLiveEvalCommand(options: {
     fixture,
     rounds: options.rounds,
     goal: options.goal ?? fixture.goal,
-    profileConfigPath: options.config,
+    profileConfigPath: resolvedProfileConfigPath,
     profile: options.profile,
     baseDir: evalRoot
   });

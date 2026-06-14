@@ -1,0 +1,75 @@
+{
+  "schemaVersion": "real-eval.v1",
+  "evidenceLevel": "real",
+  "passed": false,
+  "requiredConsecutiveRounds": 1,
+  "successfulConsecutiveRounds": 0,
+  "profile": null,
+  "fixture": "noop-js",
+  "goal": "Fix src/noop.js so echoOrFallback returns the provided non-empty string and returns \"fallback\" only when the input is blank. Do not create marker files or unrelated outputs. Keep tests passing.",
+  "modelBindings": [
+    {
+      "role": "planner",
+      "adapter": "zai-coding",
+      "model": "glm-5.1",
+      "endpoint": "https://api.z.ai/api/coding/paas/v4",
+      "apiKeyEnv": "ZAI_API_KEY"
+    },
+    {
+      "role": "compressor",
+      "adapter": "zai-coding",
+      "model": "glm-5.1",
+      "endpoint": "https://api.z.ai/api/coding/paas/v4",
+      "apiKeyEnv": "ZAI_API_KEY"
+    },
+    {
+      "role": "coder",
+      "adapter": "zai-coding",
+      "model": "glm-5.1",
+      "endpoint": "https://api.z.ai/api/coding/paas/v4",
+      "apiKeyEnv": "ZAI_API_KEY"
+    },
+    {
+      "role": "critic",
+      "adapter": "zai-coding",
+      "model": "glm-5.1",
+      "endpoint": "https://api.z.ai/api/coding/paas/v4",
+      "apiKeyEnv": "ZAI_API_KEY"
+    },
+    {
+      "role": "verifier",
+      "adapter": "zai-coding",
+      "model": "glm-5.1",
+      "endpoint": "https://api.z.ai/api/coding/paas/v4",
+      "apiKeyEnv": "ZAI_API_KEY"
+    }
+  ],
+  "evalRoot": "/Volumes/Storage/OpenMythos/eval-2026-06-14T19-20-41-026Z",
+  "startedAt": "2026-06-14T19:20:41.027Z",
+  "finishedAt": "2026-06-14T19:20:41.179Z",
+  "mode": "fixture",
+  "scoring": {
+    "requestedRounds": 1,
+    "completedRounds": 1,
+    "passedRounds": 0
+  },
+  "results": [
+    {
+      "round": 1,
+      "status": "failed",
+      "repoDir": "/Volumes/Storage/OpenMythos/eval-2026-06-14T19-20-41-026Z/round-01/repo",
+      "runDir": "/Volumes/Storage/OpenMythos/eval-2026-06-14T19-20-41-026Z/round-01/repo",
+      "changedFiles": [],
+      "passed": false,
+      "expectedChangedFilesSatisfied": false,
+      "prohibitedArtifactsDetected": [],
+      "diffStat": "",
+      "runArtifacts": [],
+      "verificationResults": [],
+      "failures": [
+        "Missing required environment variable: ZAI_API_KEY"
+      ],
+      "error": "Missing required environment variable: ZAI_API_KEY"
+    }
+  ]
+}

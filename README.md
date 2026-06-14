@@ -98,6 +98,12 @@ Or if you've already built once in this checkout:
 npm run cli -- run "your goal"
 ```
 
+Create a local config from the shipped example once per repo:
+
+```bash
+cp openmythos.config.example.json openmythos.config.json
+```
+
 To keep `openmythos` available from the shell, install it once globally from this repo:
 
 ```bash
@@ -117,11 +123,18 @@ Before the first run, validate configuration and workspace state:
 npm run cli -- setup --workdir . --json
 ```
 
+`openmythos.config.json` is auto-discovered by walking upward from the current
+shell directory and the provided `--workdir`, so running from a repo subdirectory
+still finds the repo-root config by default.
+
 Run a daily-driver session (wrapper around run with immediate execution output and optional TUI handoff):
 
 ```bash
 npm run cli -- session "your day-to-day goal" --tui
 ```
+
+Inside the TUI, `[` and `]` cycle artifact focus so the dashboard can preview
+patches, review reports, and receipts instead of only listing filenames.
 
 Run with a profile:
 
@@ -417,3 +430,19 @@ node dist/index.js release-check --workdir .
 ```
 
 Release checks are also available as `npm run cli -- release-check` after build.
+
+## Release Gate
+
+Run this exact sequence before tagging a release:
+
+```bash
+npm run check
+node dist/index.js readiness --workdir .
+node dist/index.js real-benchmark --profile zai-live-gate --suite daily-workflow-suite --workdir runs/real-evals
+node dist/index.js record-baseline claude-code <path-to-claude-run> --workdir .
+node dist/index.js record-baseline codex <path-to-codex-run> --workdir .
+node dist/index.js release-check --workdir .
+```
+
+Do not tag while `readiness` reports missing evidence, while comparative
+baseline coverage is incomplete, or while `release-check` exits non-zero.

@@ -147,7 +147,7 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
     ["src/ui/cli.ts"],
     []
   );
-  const tuiInspectionEvidence = evidence("tui.inspect", "real", "TUI renders run lists, metrics, artifacts, and recent events.", ["src/ui/tui.ts"], []);
+  const tuiInspectionEvidence = evidence("tui.inspect", "real", "TUI renders run lists, metrics, focused artifact previews, and recent events.", ["src/ui/tui.ts"], []);
   const workflowControlEvidence = hasWorkflowControlCommands
     ? evidence(
       "cli.workflow.controls",
@@ -167,7 +167,7 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
     ? evidence(
       "tui.controls",
       "real",
-      "TUI binds approval, reject, cancel, queue, and replay hotkeys for selected runs.",
+      "TUI binds approval, reject, cancel, queue, replay, and artifact-navigation hotkeys for selected runs.",
       ["src/ui/tui.ts"],
       []
     )
@@ -239,6 +239,7 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
   const hasClaudeBaseline = baselineReports[0].hasAnySummary;
   const hasCodexBaseline = baselineReports[1].hasAnySummary;
   const comparativeBaselineEvidence: EvidenceItem[] = [];
+  const comparativeCoverageMissingEvidence: EvidenceItem[] = [];
   if (!hasClaudeBaseline) {
     comparativeBaselineEvidence.push(
       evidence(
@@ -256,6 +257,15 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
           "comparative.claude.partial",
           "real",
           `Claude Code baseline coverage is partial: ${baselineReports[0].coveredFixtures.join(", ")} present; missing ${baselineReports[0].missingFixtures.join(", ")}.`,
+          baselineReports[0].summaryArtifacts,
+          ["Import a passing Claude Code comparative run for each missing fixture in the daily workflow suite."]
+        )
+      );
+      comparativeCoverageMissingEvidence.push(
+        evidence(
+          "comparative.claude.coverage.missing",
+          "missing",
+          `Claude Code baseline coverage is incomplete. Missing fixtures: ${baselineReports[0].missingFixtures.join(", ")}.`,
           baselineReports[0].summaryArtifacts,
           ["Import a passing Claude Code comparative run for each missing fixture in the daily workflow suite."]
         )
@@ -291,6 +301,15 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
           ["Import a passing Codex comparative run for each missing fixture in the daily workflow suite."]
         )
       );
+      comparativeCoverageMissingEvidence.push(
+        evidence(
+          "comparative.codex.coverage.missing",
+          "missing",
+          `Codex baseline coverage is incomplete. Missing fixtures: ${baselineReports[1].missingFixtures.join(", ")}.`,
+          baselineReports[1].summaryArtifacts,
+          ["Import a passing Codex comparative run for each missing fixture in the daily workflow suite."]
+        )
+      );
     } else {
       comparativeBaselineEvidence.push(evidence(
         "comparative.codex.present",
@@ -306,6 +325,7 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
     .filter((item): item is EvidenceItem => item !== null);
   const outcomeSuperiorityMissingEvidence = [evidence("comparative.baselines.missing", "missing", "No real-task benchmark suite with direct Claude Code and Codex baselines exists.", ["docs/plans/2026-06-14-openmythos-2027-default-harness-roadmap.md"], ["Add real repository benchmark tasks and retained baseline results for direct Claude Code and Codex runs."])]
     .concat(comparativeBaselineEvidence.filter((item) => item.level === "missing"))
+    .concat(comparativeCoverageMissingEvidence)
     .concat(strongestRealEval === null
       ? [evidence("real.eval.missing", "missing", "No passed real fixture-backed eval was found under runs/real-evals.", ["runs/real-evals"], ["Run retained live-eval on noop-js or trim-js and keep a real-evidence summary."])]
       : []);
@@ -575,6 +595,10 @@ async function collectEvalSummaries(repoRoot: string): Promise<LiveEvalSummary[]
   const summaries = await findFiles(resolve(repoRoot, "runs"), "summary.json", 8);
   const parsed: LiveEvalSummary[] = [];
   for (const summaryPath of summaries) {
+    const relativePath = relative(repoRoot, summaryPath);
+    if (relativePath.startsWith("runs/comparative-baselines/") || relativePath.startsWith("runs/baseline-sources/")) {
+      continue;
+    }
     try {
       const raw = JSON.parse(await readFile(summaryPath, "utf8")) as {
         evidenceLevel?: unknown;
@@ -584,7 +608,7 @@ async function collectEvalSummaries(repoRoot: string): Promise<LiveEvalSummary[]
         successfulConsecutiveRounds?: unknown;
       };
       parsed.push({
-        path: relative(repoRoot, summaryPath),
+        path: relativePath,
         evidenceLevel: parseEvidenceLevel(raw.evidenceLevel, summaryPath),
         profile: typeof raw.profile === "string" ? raw.profile : "unknown",
         passed: raw.passed === true,

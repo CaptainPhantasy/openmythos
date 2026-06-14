@@ -3,7 +3,7 @@ import type { Phase } from "../core/types.js";
 export interface RunState {
   runId: string;
   goal: string;
-  status: "running" | "awaiting_approval" | "completed" | "failed";
+  status: "queued" | "running" | "awaiting_approval" | "completed" | "failed";
   approved: boolean;
   currentPhase: Phase;
   phasesCompleted: Phase[];
@@ -13,6 +13,24 @@ export interface RunState {
   completedAt: string | null;
   finalOutput: string | null;
   error: string | null;
+}
+
+export interface RunAttemptArchive {
+  archivedAt: string;
+  reason: "queue";
+  sourceStatus: RunState["status"];
+  sourcePhase: Phase;
+  sourceStartedAt: string;
+  sourceCompletedAt: string | null;
+  sourceError: string | null;
+}
+
+export interface RunAttempt {
+  attemptId: string;
+  kind: "current" | "history";
+  archivedAt: string | null;
+  reason: RunAttemptArchive["reason"] | null;
+  state: RunState | null;
 }
 
 export interface RunEvent {
@@ -63,4 +81,15 @@ export interface RunMetrics {
   qaPassed: boolean | null;
   qaScore: number | null;
   modelUsage: ModelUsageMetric[];
+  reworkCount?: number;
+  unsafeEditEscapes?: number;
+  timeToVerifiedMs?: number;
+  securityFindings?: number;
+  routingDecisions?: number;
+}
+
+export interface RunMemoryRef {
+  notesAdded: number;
+  decisionsAdded: number;
+  patternsRecorded: number;
 }

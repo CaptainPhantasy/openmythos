@@ -99,7 +99,7 @@ export async function loadRealEvalSuite(suiteId: string): Promise<RealEvalSuite>
   return parsed;
 }
 
-export async function copyRealEvalFixture(fixtureId: string, destinationRepoDir: string): Promise<RealEvalFixture> {
+export async function copyRealEvalFixture(fixtureId: string, destinationRepoDir: string, configTemplatePath?: string): Promise<RealEvalFixture> {
   const fixture = await loadRealEvalFixture(fixtureId);
   const sourceRepoDir = resolve(realEvalFixtureRoot(), fixtureId, "repo");
   if (!existsSync(sourceRepoDir)) {
@@ -107,6 +107,14 @@ export async function copyRealEvalFixture(fixtureId: string, destinationRepoDir:
   }
   await mkdir(destinationRepoDir, { recursive: true });
   await cp(sourceRepoDir, destinationRepoDir, { recursive: true });
+
+  if (configTemplatePath && configTemplatePath.trim().length > 0) {
+    const configPath = resolve(configTemplatePath);
+    if (existsSync(configPath)) {
+      await cp(configPath, resolve(destinationRepoDir, "openmythos.config.json"), { force: false });
+    }
+  }
+
   return fixture;
 }
 
