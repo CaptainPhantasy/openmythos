@@ -11,7 +11,15 @@
     "build": "tsc",
     "test": "node --test dist/test/*.test.js",
     "check": "npm run build && npm test",
-    "dev": "tsx src/index.ts"
+    "dev": "tsx src/index.ts",
+    "cli": "node dist/index.js",
+    "tui": "npm run cli -- tui",
+    "claim:port": "node scripts/claim-port.js",
+    "claim:ports": "node scripts/claim-port.js 4174 && node scripts/claim-port.js 4175",
+    "void:setup": "npm install --prefix void-terminal/server && npm install --prefix void-terminal/frontend",
+    "void:build": "npm run build --prefix void-terminal/server && npm run build --prefix void-terminal/frontend",
+    "void:server": "npm run claim:port -- 4174 && npm run dev --prefix void-terminal/server",
+    "void:ui": "npm run claim:port -- 4175 && npm --prefix void-terminal/frontend run dev -- --host 0.0.0.0 --port 4175"
   },
   "dependencies": {
     "commander": "^12.1.0",

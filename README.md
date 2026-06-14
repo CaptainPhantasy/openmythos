@@ -69,11 +69,53 @@ Run a goal:
 node dist/index.js run "your goal"
 ```
 
+From source (no build-time binary needed):
+
+```bash
+npm run dev -- run "your goal"
+```
+
+Or if you've already built once in this checkout:
+
+```bash
+npm run cli -- run "your goal"
+```
+
+To keep `openmythos` available from the shell, install it once globally from this repo:
+
+```bash
+npm link
+openmythos tui
+```
+
+If you prefer not to link globally, use:
+
+```bash
+npm exec openmythos tui
+```
+
 Run with a profile:
 
 ```bash
 node dist/index.js run --profile zai-live-gate "your goal"
 node dist/index.js run --profile glm-5.2-frontier "your goal"
+```
+
+## Project Port Registry (local)
+
+This repository keeps a local port registry under `.supercache/ports` to avoid
+reusing occupied or forbidden ports.
+
+- Forbidden runtime ports: `3000`, `5173`
+- Default claimed runtime ports for the VOID UI:
+  - `npm run void:server` → port `4174`
+  - `npm run void:ui` → port `4175`
+
+Before starting a new local service, claim its port:
+
+```bash
+npm run claim:port -- 4174
+npm run claim:port -- 4175
 ```
 
 Run the deterministic fake eval:

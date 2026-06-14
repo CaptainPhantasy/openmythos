@@ -4,3 +4,4 @@ runs/
 .env
 *.log
 .DS_Store
+.supercache/
