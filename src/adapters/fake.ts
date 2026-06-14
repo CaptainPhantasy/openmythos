@@ -42,9 +42,38 @@ export class FakeAdapter implements ModelAdapter {
       const aliasTools = request.messages.some((message) => message.content.includes("alias tool normalization"));
       const verifierRouting = request.messages.some((message) => message.content.includes("verifier task routing"));
       const harnessExecutor = request.messages.some((message) => message.content.includes("harness task execution"));
+      const harnessStatusAction = request.messages.some((message) => message.content.includes("harness git status action"));
+      const successCriteria = harnessStatusAction
+        ? [
+            "Git status context is captured",
+            "The harness verification command succeeds"
+          ]
+        : [
+            "openmythos-fake-output.txt exists",
+            "openmythos-fake-output.txt contains OPENMYTHOS_FAKE_SUCCESS"
+          ];
       return {
         goal: "deterministic fake run",
-        tasks: (verifierRouting || harnessExecutor)
+        tasks: harnessStatusAction
+          ? [
+              {
+                id: "task-1",
+                title: "Inspect git status via harness action",
+                description: "Capture deterministic git status context through the harness executor.",
+                role: "verifier",
+                executor: "harness",
+                harnessAction: "verify.git_status",
+                fileTargets: [],
+                requiredTools: ["git.status", "verification.command"],
+                verificationCommands: ["test 1 -eq 1"],
+                executionMode: "serial",
+                acceptanceCriteria: [
+                  "Git status context is captured",
+                  "The verification command succeeds"
+                ]
+              }
+            ]
+          : (verifierRouting || harnessExecutor)
           ? [
               {
                 id: "task-1",
@@ -52,6 +81,7 @@ export class FakeAdapter implements ModelAdapter {
                 description: "Create a file proving the runner applied a model-provided edit.",
                 role: "coder",
                 executor: "model",
+                harnessAction: null,
                 fileTargets: ["openmythos-fake-output.txt"],
                 requiredTools: ["filesystem.write"],
                 verificationCommands: ["test -f openmythos-fake-output.txt"],
@@ -67,9 +97,10 @@ export class FakeAdapter implements ModelAdapter {
                 description: "Verify the marker file with the verifier worker.",
                 role: "verifier",
                 executor: harnessExecutor ? "harness" : "model",
+                harnessAction: harnessExecutor ? "verify.file_state" : null,
                 fileTargets: ["openmythos-fake-output.txt"],
                 requiredTools: harnessExecutor
-                  ? ["filesystem.read", "git.status", "verification.command"]
+                  ? ["filesystem.read", "verification.command"]
                   : ["filesystem.read", "verification.command"],
                 verificationCommands: ["grep -qx 'OPENMYTHOS_FAKE_SUCCESS' openmythos-fake-output.txt"],
                 executionMode: "serial",
@@ -86,6 +117,7 @@ export class FakeAdapter implements ModelAdapter {
                 description: "Create a file proving the runner applied a model-provided edit.",
                 role: "coder",
                 executor: "model",
+                harnessAction: null,
                 fileTargets: ["openmythos-fake-output.txt"],
                 requiredTools: aliasTools ? ["write", "bash"] : ["filesystem.write"],
                 verificationCommands: failingVerification
@@ -98,11 +130,8 @@ export class FakeAdapter implements ModelAdapter {
                 ]
               }
             ],
-        dependencies: verifierRouting ? { "task-2": ["task-1"] } : {},
-        successCriteria: [
-          "openmythos-fake-output.txt exists",
-          "openmythos-fake-output.txt contains OPENMYTHOS_FAKE_SUCCESS"
-        ]
+        dependencies: verifierRouting || harnessExecutor ? { "task-2": ["task-1"] } : {},
+        successCriteria
       };
     }
 
@@ -142,15 +171,21 @@ export class FakeAdapter implements ModelAdapter {
     }
 
     if (request.system.includes("final QA gate")) {
+      const harnessStatusAction = request.messages.some((message) => message.content.includes("Inspect git status via harness action"));
       return {
         passed: true,
         score: 100,
         issues: [],
         suggestions: [],
-        verifiedCriteria: [
-          "openmythos-fake-output.txt exists",
-          "openmythos-fake-output.txt contains OPENMYTHOS_FAKE_SUCCESS"
-        ],
+        verifiedCriteria: harnessStatusAction
+          ? [
+              "Git status context is captured",
+              "The harness verification command succeeds"
+            ]
+          : [
+              "openmythos-fake-output.txt exists",
+              "openmythos-fake-output.txt contains OPENMYTHOS_FAKE_SUCCESS"
+            ],
         failedCriteria: []
       };
     }

@@ -222,9 +222,9 @@ Each run writes an inspectable artifact set:
 - `context.json`: selected file manifest and compressed context.
 - `plan.json`: schema-validated execution plan.
 - `outputs.json`: schema-validated worker outputs and file edits.
-- `execution.json`: deterministic task execution receipts, including required
-  tools, structured observations, task-level verification commands, command
-  results, and next actions.
+- `execution.json`: deterministic task execution receipts, including
+  `executor`, `harnessAction`, required tools, structured observations,
+  task-level verification commands, command results, and next actions.
 - `task-observation-*.json`: structured read-only evidence captured by
   harness-executed verifier tasks.
 - `qa.json`: local and model verification result.
@@ -249,14 +249,18 @@ Local review writes artifact pairs under `reviews/` by default:
 
 Plan task contract:
 
-- planners can now specify `requiredTools`, `executor`, and `executionMode`
+- planners can now specify `requiredTools`, `executor`, `harnessAction`, and
+  `executionMode`
 - planners can specify `verificationCommands` for task-level local evidence
 - `requiredTools` are normalized against a deterministic harness catalog and
   repaired or rejected when they reference unsupported or role-mismatched tools
 - planners can set `executor = "harness"` for read-only verifier work so the
   harness can execute deterministic verification tasks without a model call
-- harness-executed verifier tasks retain structured observations such as file
-  reads, git state, and workflow artifact context for later QA and audit
+- harness-executed verifier tasks must declare a typed `harnessAction`, and the
+  harness now rejects tool/action mismatches before execution
+- harness-executed verifier tasks retain structured observations matched to the
+  selected action family, such as file-state reads, git state, diffs, and
+  workflow artifact context for later QA and audit
 - task roles are now routed through matching worker lanes, including
   task-level `verifier` execution before the final QA gate
 - the harness can batch dependency-free tasks when they are marked
@@ -274,6 +278,15 @@ Current supported `requiredTools` ids:
 - `git.diff`
 - `git.issue_view`
 - `git.pr_view`
+
+Current supported `harnessAction` ids:
+
+- `verify.file_state`
+- `verify.git_status`
+- `verify.git_diff`
+- `verify.issue_context`
+- `verify.pr_context`
+- `verify.pr_checks`
 
 ## Z.AI / GLM Notes
 

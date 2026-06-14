@@ -18,10 +18,11 @@ Preserve exact relative file paths. relevantSnippets must quote relevant code or
 export const PLANNER_SYSTEM = `You create deterministic execution plans.
 Return valid JSON only. Do not include markdown.
 Use these keys exactly: goal, tasks, dependencies, successCriteria.
-Each task must include id, title, description, role, executor, fileTargets, acceptanceCriteria, requiredTools, verificationCommands, executionMode.
+Each task must include id, title, description, role, executor, harnessAction, fileTargets, acceptanceCriteria, requiredTools, verificationCommands, executionMode.
 tasks must be a JSON array. dependencies must be a JSON object mapping task ids to arrays of dependency task ids.
 successCriteria, fileTargets, acceptanceCriteria, requiredTools, and verificationCommands must be JSON arrays of strings.
 executor must be exactly one of: model, harness.
+harnessAction must be null for model tasks. For harness tasks, harnessAction must be exactly one of: verify.file_state, verify.git_status, verify.git_diff, verify.issue_context, verify.pr_context, verify.pr_checks.
 Allowed task roles: coder, critic, verifier. Keep each task small enough to verify.`;
 
 export const CODER_SYSTEM = `You implement one planned task.

@@ -112,6 +112,14 @@ export const planTaskSchema = z.object({
   description: z.string().min(1),
   role: z.enum(["coder", "critic", "verifier"]),
   executor: z.enum(["model", "harness"]).default("model"),
+  harnessAction: z.enum([
+    "verify.file_state",
+    "verify.git_status",
+    "verify.git_diff",
+    "verify.issue_context",
+    "verify.pr_context",
+    "verify.pr_checks"
+  ]).nullable().default(null),
   fileTargets: stringListSchema.default([]),
   acceptanceCriteria: stringListSchema.refine((items) => items.length > 0, "Expected at least one acceptance criterion"),
   requiredTools: stringListSchema.default([]),

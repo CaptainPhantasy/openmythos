@@ -14,6 +14,7 @@ test("normalizePlanTools maps common aliases onto supported tool ids", () => {
       description: "Alias",
       role: "coder",
       executor: "model",
+      harnessAction: null,
       fileTargets: ["file.txt"],
       acceptanceCriteria: ["done"],
       requiredTools: ["write", "bash", "write"],
@@ -38,6 +39,7 @@ test("normalizePlanTools reports unsupported tools and role mismatches", () => {
       description: "Mismatch",
       role: "critic",
       executor: "model",
+      harnessAction: null,
       fileTargets: [],
       acceptanceCriteria: ["done"],
       requiredTools: ["deploy.prod", "shell.run"],
@@ -64,6 +66,7 @@ test("normalizePlanTools rejects invalid harness executors", () => {
       description: "Harness mismatch",
       role: "coder",
       executor: "harness",
+      harnessAction: null,
       fileTargets: [],
       acceptanceCriteria: ["done"],
       requiredTools: ["filesystem.write"],
@@ -74,4 +77,28 @@ test("normalizePlanTools rejects invalid harness executors", () => {
 
   const normalized = normalizePlanTools(plan);
   assert.ok(normalized.issues.some((issue) => issue.reason === "executor_mismatch"));
+});
+
+test("normalizePlanTools rejects harness actions that do not match allowed tools", () => {
+  const plan: Plan = {
+    goal: "Harness action mismatch",
+    dependencies: {},
+    successCriteria: ["done"],
+    tasks: [{
+      id: "task-1",
+      title: "Harness action mismatch",
+      description: "Harness action mismatch",
+      role: "verifier",
+      executor: "harness",
+      harnessAction: "verify.file_state",
+      fileTargets: ["file.txt"],
+      acceptanceCriteria: ["done"],
+      requiredTools: ["git.status", "verification.command"],
+      verificationCommands: ["test 1 -eq 1"],
+      executionMode: "serial"
+    }]
+  };
+
+  const normalized = normalizePlanTools(plan);
+  assert.ok(normalized.issues.some((issue) => issue.reason === "action_mismatch" && issue.tool === "git.status"));
 });

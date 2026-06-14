@@ -1,4 +1,4 @@
-import type { Plan, PlanTask } from "./types.js";
+import type { HarnessAction, Plan, PlanTask } from "./types.js";
 
 export interface ToolDefinition {
   id: string;
@@ -10,8 +10,14 @@ export interface ToolValidationIssue {
   taskId: string;
   tool: string;
   normalizedTool?: string;
-  reason: "unsupported" | "role_mismatch" | "executor_mismatch";
+  reason: "unsupported" | "role_mismatch" | "executor_mismatch" | "action_mismatch";
   role: PlanTask["role"];
+}
+
+export interface HarnessActionDefinition {
+  id: HarnessAction;
+  description: string;
+  allowedTools: string[];
 }
 
 const toolCatalog: ToolDefinition[] = [
@@ -67,6 +73,39 @@ const toolCatalog: ToolDefinition[] = [
   }
 ];
 
+const harnessActionCatalog: HarnessActionDefinition[] = [
+  {
+    id: "verify.file_state",
+    description: "Read targeted files and verify their current repository state.",
+    allowedTools: ["filesystem.read", "verification.command"]
+  },
+  {
+    id: "verify.git_status",
+    description: "Inspect branch and dirty-worktree state before proceeding.",
+    allowedTools: ["git.status", "verification.command"]
+  },
+  {
+    id: "verify.git_diff",
+    description: "Inspect repository diffs and review-oriented change state.",
+    allowedTools: ["git.diff", "review.inspect", "verification.command"]
+  },
+  {
+    id: "verify.issue_context",
+    description: "Read issue-backed workflow context retained by the harness.",
+    allowedTools: ["git.issue_view", "verification.command"]
+  },
+  {
+    id: "verify.pr_context",
+    description: "Read pull request context retained by the harness.",
+    allowedTools: ["git.pr_view", "verification.command"]
+  },
+  {
+    id: "verify.pr_checks",
+    description: "Inspect retained pull request check and verification state.",
+    allowedTools: ["git.pr_view", "verification.command"]
+  }
+];
+
 const aliasMap: Record<string, string> = {
   bash: "shell.run",
   shell: "shell.run",
@@ -93,6 +132,7 @@ const aliasMap: Record<string, string> = {
 };
 
 const catalogById = new Map(toolCatalog.map((tool) => [tool.id, tool]));
+const harnessActionById = new Map(harnessActionCatalog.map((action) => [action.id, action]));
 const harnessOnlyTools = new Set([
   "filesystem.read",
   "verification.command",
@@ -107,9 +147,22 @@ export function supportedTools(): ToolDefinition[] {
   return toolCatalog.map((tool) => ({ ...tool, roles: [...tool.roles] }));
 }
 
+export function supportedHarnessActions(): HarnessActionDefinition[] {
+  return harnessActionCatalog.map((action) => ({
+    ...action,
+    allowedTools: [...action.allowedTools]
+  }));
+}
+
 export function formatToolCatalogForPrompt(): string {
   return toolCatalog
     .map((tool) => `- ${tool.id}: ${tool.description} Allowed roles: ${tool.roles.join(", ")}`)
+    .join("\n");
+}
+
+export function formatHarnessActionCatalogForPrompt(): string {
+  return harnessActionCatalog
+    .map((action) => `- ${action.id}: ${action.description} Allowed tools: ${action.allowedTools.join(", ")}`)
     .join("\n");
 }
 
@@ -150,6 +203,14 @@ export function normalizePlanTools(plan: Plan): { plan: Plan; issues: ToolValida
 
   for (const task of tasks) {
     if (task.executor !== "harness") {
+      if (task.harnessAction !== null) {
+        issues.push({
+          taskId: task.id,
+          tool: `harnessAction:${task.harnessAction}`,
+          reason: "action_mismatch",
+          role: task.role
+        });
+      }
       continue;
     }
     if (task.role !== "verifier") {
@@ -159,6 +220,25 @@ export function normalizePlanTools(plan: Plan): { plan: Plan; issues: ToolValida
         reason: "executor_mismatch",
         role: task.role
       });
+    }
+    if (task.harnessAction === null) {
+      issues.push({
+        taskId: task.id,
+        tool: "harnessAction",
+        reason: "action_mismatch",
+        role: task.role
+      });
+      continue;
+    }
+    const harnessAction = harnessActionById.get(task.harnessAction);
+    if (!harnessAction) {
+      issues.push({
+        taskId: task.id,
+        tool: `harnessAction:${task.harnessAction}`,
+        reason: "action_mismatch",
+        role: task.role
+      });
+      continue;
     }
     if (task.verificationCommands.length === 0) {
       issues.push({
@@ -174,6 +254,15 @@ export function normalizePlanTools(plan: Plan): { plan: Plan; issues: ToolValida
           taskId: task.id,
           tool,
           reason: "executor_mismatch",
+          role: task.role
+        });
+        continue;
+      }
+      if (!harnessAction.allowedTools.includes(tool)) {
+        issues.push({
+          taskId: task.id,
+          tool,
+          reason: "action_mismatch",
           role: task.role
         });
       }

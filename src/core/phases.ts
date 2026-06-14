@@ -20,7 +20,12 @@ import { executeShell, type ShellResult } from "../tools/shell.js";
 import { parseJsonFromModel } from "./json.js";
 import { ApprovalRequiredError, createReviewBundle } from "./review.js";
 import { contextSchema, intakeSchema, planSchema, qaSchema, taskOutputSchema } from "./schemas.js";
-import { formatToolCatalogForPrompt, normalizePlanTools, summarizeToolValidationIssues } from "./tooling.js";
+import {
+  formatHarnessActionCatalogForPrompt,
+  formatToolCatalogForPrompt,
+  normalizePlanTools,
+  summarizeToolValidationIssues
+} from "./tooling.js";
 import { buildExecutionBatches } from "./toposort.js";
 import type { AdapterRequest, CommandReceipt, ContextResult, IntakeResult, Plan, PlanTask, QaResult, ReviewBundle, TaskExecutionReceipt, TaskObservation, TaskOutput } from "./types.js";
 import type { ModelUsageMetric } from "../state/types.js";
@@ -92,7 +97,7 @@ export class PhaseExecutor {
       json: true as const,
       messages: [{
         role: "user" as const,
-        content: `Goal:\n${goal}\n\nTask type: ${intake.taskType}\n\nSuccess criteria:\n${intake.successCriteria.map((criterion) => `- ${criterion}`).join("\n")}\n\nContext summary:\n${context.summary}\n\nRelevant snippets:\n${snippets}\n\nAvailable harness tools:\n${formatToolCatalogForPrompt()}\n\n${repairNotes ? `Repair notes from failed verification:\n${repairNotes}\n\n` : ""}${extraNotes}`
+        content: `Goal:\n${goal}\n\nTask type: ${intake.taskType}\n\nSuccess criteria:\n${intake.successCriteria.map((criterion) => `- ${criterion}`).join("\n")}\n\nContext summary:\n${context.summary}\n\nRelevant snippets:\n${snippets}\n\nAvailable harness tools:\n${formatToolCatalogForPrompt()}\n\nAvailable harness actions:\n${formatHarnessActionCatalogForPrompt()}\n\n${repairNotes ? `Repair notes from failed verification:\n${repairNotes}\n\n` : ""}${extraNotes}`
       }]
     });
 
@@ -397,6 +402,7 @@ export class PhaseExecutor {
         taskId: task.id,
         executorKind,
         executorRole,
+        harnessAction: task.harnessAction,
         status: "error",
         summary: `${actionSummary}, but ${failingResults.length} task verification command(s) failed.`,
         requiredTools: task.requiredTools,
@@ -413,6 +419,7 @@ export class PhaseExecutor {
         taskId: task.id,
         executorKind,
         executorRole,
+        harnessAction: task.harnessAction,
         status: "warning",
         summary: `${actionSummary}, but no task-level verification commands were provided.`,
         requiredTools: task.requiredTools,
@@ -428,6 +435,7 @@ export class PhaseExecutor {
       taskId: task.id,
       executorKind,
       executorRole,
+      harnessAction: task.harnessAction,
       status: "success",
       summary: `${actionSummary} and passed all task-level verification commands.`,
       requiredTools: task.requiredTools,
@@ -441,70 +449,85 @@ export class PhaseExecutor {
 
   private async collectHarnessObservations(task: PlanTask): Promise<TaskObservation[]> {
     const observations: TaskObservation[] = [];
-
-    if (task.requiredTools.includes("filesystem.read")) {
-      for (const file of task.fileTargets) {
-        try {
-          const content = await readRelativeFile(this.workdir, file);
+    switch (task.harnessAction) {
+      case "verify.file_state":
+        await this.collectFileStateObservations(task, observations);
+        break;
+      case "verify.git_status": {
+        const gitStatus = await this.collectGitStatusObservation();
+        if (gitStatus) {
+          observations.push(gitStatus);
+        }
+        break;
+      }
+      case "verify.git_diff": {
+        const gitDiff = await this.collectGitDiffObservation();
+        if (gitDiff) {
+          observations.push(gitDiff);
+        }
+        if (task.requiredTools.includes("review.inspect")) {
           observations.push({
-            kind: "filesystem.read",
-            status: "success",
-            summary: `Read ${file}`,
-            content
-          });
-        } catch (error) {
-          observations.push({
-            kind: "filesystem.read",
+            kind: "review.inspect",
             status: "warning",
-            summary: `Could not read ${file}`,
-            content: `[read failed: ${(error as Error).message}]`
+            summary: "No review artifacts exist before apply.",
+            content: "Review artifacts are created after task execution when the harness evaluates proposed file edits."
           });
         }
+        break;
       }
-    }
-
-    if (task.requiredTools.includes("git.status")) {
-      const gitStatus = await this.collectGitStatusObservation();
-      if (gitStatus) {
-        observations.push(gitStatus);
+      case "verify.issue_context": {
+        const issueObservation = await this.collectArtifactObservation("issue.context", "issue.json");
+        if (issueObservation) {
+          observations.push(issueObservation);
+        }
+        break;
       }
-    }
-
-    if (task.requiredTools.includes("git.diff")) {
-      const gitDiff = await this.collectGitDiffObservation();
-      if (gitDiff) {
-        observations.push(gitDiff);
+      case "verify.pr_context": {
+        const pullRequestObservation = await this.collectArtifactObservation("pull_request.context", "pull-request.json");
+        if (pullRequestObservation) {
+          observations.push(pullRequestObservation);
+        }
+        break;
       }
-    }
-
-    if (task.requiredTools.includes("git.issue_view")) {
-      const issueObservation = await this.collectArtifactObservation("issue.context", "issue.json");
-      if (issueObservation) {
-        observations.push(issueObservation);
+      case "verify.pr_checks": {
+        const verificationObservation = await this.collectArtifactObservation("pull_request.verification", "pr-verification.json");
+        if (verificationObservation) {
+          observations.push(verificationObservation);
+        }
+        break;
       }
-    }
-
-    if (task.requiredTools.includes("git.pr_view")) {
-      const pullRequestObservation = await this.collectArtifactObservation("pull_request.context", "pull-request.json");
-      if (pullRequestObservation) {
-        observations.push(pullRequestObservation);
-      }
-      const verificationObservation = await this.collectArtifactObservation("pull_request.verification", "pr-verification.json");
-      if (verificationObservation) {
-        observations.push(verificationObservation);
-      }
-    }
-
-    if (task.requiredTools.includes("review.inspect")) {
-      observations.push({
-        kind: "review.inspect",
-        status: "warning",
-        summary: "No review artifacts exist before apply.",
-        content: "Review artifacts are created after task execution when the harness evaluates proposed file edits."
-      });
+      case null:
+        observations.push({
+          kind: "harness.action",
+          status: "error",
+          summary: "Harness task is missing harnessAction.",
+          content: "The planner must provide a harnessAction for executor=harness tasks."
+        });
+        break;
     }
 
     return observations;
+  }
+
+  private async collectFileStateObservations(task: PlanTask, observations: TaskObservation[]): Promise<void> {
+    for (const file of task.fileTargets) {
+      try {
+        const content = await readRelativeFile(this.workdir, file);
+        observations.push({
+          kind: "filesystem.read",
+          status: "success",
+          summary: `Read ${file}`,
+          content
+        });
+      } catch (error) {
+        observations.push({
+          kind: "filesystem.read",
+          status: "warning",
+          summary: `Could not read ${file}`,
+          content: `[read failed: ${(error as Error).message}]`
+        });
+      }
+    }
   }
 
   private async collectGitStatusObservation(): Promise<TaskObservation | null> {

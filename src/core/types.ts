@@ -26,12 +26,21 @@ export interface Plan {
   successCriteria: string[];
 }
 
+export type HarnessAction =
+  | "verify.file_state"
+  | "verify.git_status"
+  | "verify.git_diff"
+  | "verify.issue_context"
+  | "verify.pr_context"
+  | "verify.pr_checks";
+
 export interface PlanTask {
   id: string;
   title: string;
   description: string;
   role: Extract<ModelRole, "coder" | "critic" | "verifier">;
   executor: "model" | "harness";
+  harnessAction: HarnessAction | null;
   fileTargets: string[];
   acceptanceCriteria: string[];
   requiredTools: string[];
@@ -58,6 +67,7 @@ export interface TaskExecutionReceipt {
   taskId: string;
   executorKind: PlanTask["executor"];
   executorRole: Extract<ModelRole, "coder" | "critic" | "verifier">;
+  harnessAction: PlanTask["harnessAction"];
   status: "success" | "warning" | "error";
   summary: string;
   requiredTools: string[];

@@ -49,6 +49,7 @@ test("schemas normalize single string list fields from live model output", () =>
       description: "Create marker file",
       role: "coder",
       executor: "model",
+      harnessAction: null,
       fileTargets: "openmythos-live-output.txt",
       acceptanceCriteria: "file has exact marker",
       requiredTools: "filesystem.write",
@@ -65,6 +66,7 @@ test("schemas normalize single string list fields from live model output", () =>
   assert.deepEqual(firstTask.requiredTools, ["filesystem.write"]);
   assert.deepEqual(firstTask.verificationCommands, ["test -f openmythos-live-output.txt"]);
   assert.equal(firstTask.executor, "model");
+  assert.equal(firstTask.harnessAction, null);
   assert.equal(firstTask.executionMode, "parallel");
   assert.deepEqual(plan.dependencies["task-1"], ["task-0"]);
   assert.deepEqual(plan.successCriteria, ["file has exact marker"]);

@@ -119,6 +119,7 @@ test("Runner can execute verifier tasks on the harness executor path", async () 
     taskId: string;
     executorKind: string;
     executorRole: string;
+    harnessAction: string | null;
     status: string;
     observations: Array<{ kind: string; status: string; content: string }>;
     artifacts: string[];
@@ -130,19 +131,44 @@ test("Runner can execute verifier tasks on the harness executor path", async () 
 
   assert.equal(result.status, "completed");
   assert.deepEqual(
-    execution.map((receipt) => [receipt.taskId, receipt.executorKind, receipt.executorRole, receipt.status]),
+    execution.map((receipt) => [receipt.taskId, receipt.executorKind, receipt.executorRole, receipt.harnessAction, receipt.status]),
     [
-      ["task-1", "model", "coder", "success"],
-      ["task-2", "harness", "verifier", "success"]
+      ["task-1", "model", "coder", null, "success"],
+      ["task-2", "harness", "verifier", "verify.file_state", "success"]
     ]
   );
   assert.equal(execution[1]?.observations[0]?.kind, "filesystem.read");
   assert.match(execution[1]?.observations[0]?.content ?? "", /OPENMYTHOS_FAKE_SUCCESS/);
-  assert.equal(execution[1]?.observations[1]?.kind, "git.status");
-  assert.equal(execution[1]?.observations[1]?.status, "warning");
+  assert.equal(execution[1]?.observations.length, 1);
   assert.ok(execution[1]?.artifacts.some((artifact) => artifact.endsWith("task-observation-task-2.json")));
   assert.equal(metrics.modelTaskCount, 1);
   assert.equal(metrics.harnessTaskCount, 1);
+});
+
+test("Runner dispatches git-status harness actions without file-state observations", async () => {
+  const workdir = await mkdtemp(join(tmpdir(), "openmythos-fake-harness-status-"));
+  const config = await loadConfigWithOptionalProfile(resolve("openmythos.config.json"), "fake");
+  config.verification.localCommands = [];
+  const runner = new Runner(config, new StateStore(resolve(workdir, "runs")), workdir);
+
+  const result = await runner.run("harness git status action");
+  const execution = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "execution.json"), "utf8")) as Array<{
+    taskId: string;
+    executorKind: string;
+    executorRole: string;
+    harnessAction: string | null;
+    status: string;
+    observations: Array<{ kind: string; status: string; content: string }>;
+  }>;
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(
+    execution.map((receipt) => [receipt.taskId, receipt.executorKind, receipt.executorRole, receipt.harnessAction, receipt.status]),
+    [["task-1", "harness", "verifier", "verify.git_status", "success"]]
+  );
+  assert.equal(execution[0]?.observations.length, 1);
+  assert.equal(execution[0]?.observations[0]?.kind, "git.status");
+  assert.equal(execution[0]?.observations[0]?.status, "warning");
 });
 
 test("Runner can stop in awaiting_approval before applying risky edits", async () => {
