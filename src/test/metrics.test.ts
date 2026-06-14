@@ -26,6 +26,8 @@ test("summarizeBench aggregates retained run metrics", () => {
       blockingReviewCount: 0,
       localVerificationCount: 2,
       localVerificationFailureCount: 0,
+      taskVerificationCount: 2,
+      taskVerificationFailureCount: 0,
       qaPassed: true,
       qaScore: 100,
       modelUsage: [
@@ -50,6 +52,8 @@ test("summarizeBench aggregates retained run metrics", () => {
       blockingReviewCount: 0,
       localVerificationCount: 1,
       localVerificationFailureCount: 1,
+      taskVerificationCount: 1,
+      taskVerificationFailureCount: 1,
       qaPassed: false,
       qaScore: 40,
       modelUsage: [
@@ -66,6 +70,8 @@ test("summarizeBench aggregates retained run metrics", () => {
   assert.equal(summary.averageQaScore, 70);
   assert.equal(summary.totalInputTokens, 130);
   assert.equal(summary.totalPatchEdits, 1);
+  assert.equal(summary.totalTaskVerificationCount, 3);
+  assert.equal(summary.totalTaskVerificationFailures, 1);
 });
 
 test("collectRunMetrics finds metrics artifacts under eval-style nested roots", async () => {
@@ -90,6 +96,8 @@ test("collectRunMetrics finds metrics artifacts under eval-style nested roots", 
     blockingReviewCount: 0,
     localVerificationCount: 0,
     localVerificationFailureCount: 0,
+    taskVerificationCount: 0,
+    taskVerificationFailureCount: 0,
     qaPassed: true,
     qaScore: 100,
     modelUsage: []

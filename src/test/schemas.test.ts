@@ -51,6 +51,7 @@ test("schemas normalize single string list fields from live model output", () =>
       fileTargets: "openmythos-live-output.txt",
       acceptanceCriteria: "file has exact marker",
       requiredTools: "filesystem.write",
+      verificationCommands: "test -f openmythos-live-output.txt",
       executionMode: "parallel"
     }],
     dependencies: { "task-1": "task-0" },
@@ -61,6 +62,7 @@ test("schemas normalize single string list fields from live model output", () =>
   assert.deepEqual(firstTask.fileTargets, ["openmythos-live-output.txt"]);
   assert.deepEqual(firstTask.acceptanceCriteria, ["file has exact marker"]);
   assert.deepEqual(firstTask.requiredTools, ["filesystem.write"]);
+  assert.deepEqual(firstTask.verificationCommands, ["test -f openmythos-live-output.txt"]);
   assert.equal(firstTask.executionMode, "parallel");
   assert.deepEqual(plan.dependencies["task-1"], ["task-0"]);
   assert.deepEqual(plan.successCriteria, ["file has exact marker"]);

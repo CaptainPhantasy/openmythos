@@ -31,7 +31,8 @@ exhausted.
 - Patch-safe file edits plus review artifacts before apply.
 - Approval policy for risky file actions before apply.
 - Governance preflight for git-required mode, dirty-worktree policy, and protected branches.
-- Local verification commands before model QA.
+- Local verification commands before model QA, plus per-task verification commands
+  retained as execution receipts.
 - Structured `review` command for local git diffs with machine-readable findings.
 - Issue ingestion from local files and GitHub issue references.
 - Pull-request ingestion from local files and GitHub pull requests, with external
@@ -219,6 +220,8 @@ Each run writes an inspectable artifact set:
 - `context.json`: selected file manifest and compressed context.
 - `plan.json`: schema-validated execution plan.
 - `outputs.json`: schema-validated worker outputs and file edits.
+- `execution.json`: deterministic task execution receipts, including required
+  tools, task-level verification commands, command results, and next actions.
 - `qa.json`: local and model verification result.
 - `issue.json`: canonical issue payload when a run was started from an issue
   source.
@@ -242,6 +245,7 @@ Local review writes artifact pairs under `reviews/` by default:
 Plan task contract:
 
 - planners can now specify `requiredTools` and `executionMode`
+- planners can specify `verificationCommands` for task-level local evidence
 - the harness can batch dependency-free tasks when they are marked
   `executionMode = "parallel"` and do not target the same files
 

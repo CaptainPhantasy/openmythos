@@ -38,6 +38,7 @@ export class FakeAdapter implements ModelAdapter {
     }
 
     if (request.system.includes("create deterministic execution plans")) {
+      const failingVerification = request.messages.some((message) => message.content.includes("failing task verification"));
       return {
         goal: "deterministic fake run",
         tasks: [
@@ -48,6 +49,9 @@ export class FakeAdapter implements ModelAdapter {
             role: "coder",
             fileTargets: ["openmythos-fake-output.txt"],
             requiredTools: ["filesystem.write"],
+            verificationCommands: failingVerification
+              ? ["test -f openmythos-fake-output.txt", "test -f definitely-missing-task-verification.txt"]
+              : ["test -f openmythos-fake-output.txt", "grep -qx 'OPENMYTHOS_FAKE_SUCCESS' openmythos-fake-output.txt"],
             executionMode: "serial",
             acceptanceCriteria: [
               "The file exists",

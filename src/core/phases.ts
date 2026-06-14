@@ -19,7 +19,7 @@ import { parseJsonFromModel } from "./json.js";
 import { ApprovalRequiredError, createReviewBundle } from "./review.js";
 import { contextSchema, intakeSchema, planSchema, qaSchema, taskOutputSchema } from "./schemas.js";
 import { buildExecutionBatches } from "./toposort.js";
-import type { AdapterRequest, ContextResult, IntakeResult, Plan, PlanTask, QaResult, ReviewBundle, TaskOutput } from "./types.js";
+import type { AdapterRequest, CommandReceipt, ContextResult, IntakeResult, Plan, PlanTask, QaResult, ReviewBundle, TaskExecutionReceipt, TaskOutput } from "./types.js";
 import type { ModelUsageMetric } from "../state/types.js";
 
 export class PhaseExecutor {
@@ -27,8 +27,11 @@ export class PhaseExecutor {
   private readonly reviews: ReviewBundle[] = [];
   private lastVerificationSummary = {
     localVerificationCount: 0,
-    localVerificationFailureCount: 0
+    localVerificationFailureCount: 0,
+    taskVerificationCount: 0,
+    taskVerificationFailureCount: 0
   };
+  private taskReceipts: TaskExecutionReceipt[] = [];
 
   constructor(
     private readonly config: OpenMythosConfig,
@@ -93,6 +96,7 @@ export class PhaseExecutor {
 
   async execute(plan: Plan, context: ContextResult): Promise<TaskOutput[]> {
     const outputs: TaskOutput[] = [];
+    this.taskReceipts = [];
     const batches = buildExecutionBatches(plan.tasks, plan.dependencies);
     const snippets = Object.entries(context.relevantSnippets)
       .map(([path, content]) => `=== ${path} ===\n${content}`)
@@ -120,6 +124,7 @@ export class PhaseExecutor {
 
       for (const item of batchOutputs) {
         await applyFileEdits(this.workdir, item.output.fileEdits, this.runDir);
+        this.taskReceipts.push(await this.buildTaskReceipt(item.task, item.output, item.review));
         outputs.push(item.output);
       }
     }
@@ -133,21 +138,37 @@ export class PhaseExecutor {
       localResults.push(await executeShell(command, this.workdir, this.config.execution.timeoutMs));
     }
 
+    const taskVerificationResults = this.taskReceipts.flatMap((receipt) =>
+      receipt.verificationResults.map((result) => ({
+        taskId: receipt.taskId,
+        result
+      }))
+    );
+    const taskVerificationFailures = taskVerificationResults.filter((entry) => entry.result.exitCode !== 0);
+
     this.lastVerificationSummary = {
       localVerificationCount: localResults.length,
-      localVerificationFailureCount: localResults.filter((result) => result.exitCode !== 0).length
+      localVerificationFailureCount: localResults.filter((result) => result.exitCode !== 0).length,
+      taskVerificationCount: taskVerificationResults.length,
+      taskVerificationFailureCount: taskVerificationFailures.length
     };
 
     const localFailures = localResults.filter((result) => result.exitCode !== 0);
-    if (this.config.verification.requireLocalPassBeforeModelQa && localFailures.length > 0) {
+    if (this.config.verification.requireLocalPassBeforeModelQa && (localFailures.length > 0 || taskVerificationFailures.length > 0)) {
       return {
         passed: false,
         score: 0,
-        issues: localFailures.map((result) => ({
-          severity: "critical",
-          description: `Local command failed: ${result.command}\nstdout:\n${result.stdout.slice(-2000)}\nstderr:\n${result.stderr.slice(-2000)}`
-        })),
-        suggestions: ["Fix failing local verification commands before model QA."],
+        issues: [
+          ...localFailures.map((result) => ({
+            severity: "critical" as const,
+            description: `Local command failed: ${result.command}\nstdout:\n${result.stdout.slice(-2000)}\nstderr:\n${result.stderr.slice(-2000)}`
+          })),
+          ...taskVerificationFailures.map((entry) => ({
+            severity: "critical" as const,
+            description: `Task verification failed for ${entry.taskId}: ${entry.result.command}\nstdout:\n${entry.result.stdout.slice(-2000)}\nstderr:\n${entry.result.stderr.slice(-2000)}`
+          }))
+        ],
+        suggestions: ["Fix failing local or task-level verification commands before model QA."],
         verifiedCriteria: [],
         failedCriteria: plan.successCriteria
       };
@@ -173,7 +194,7 @@ export class PhaseExecutor {
       json: true,
       messages: [{
         role: "user",
-        content: `Goal:\n${goal}\n\nSuccess criteria:\n${plan.successCriteria.map((criterion) => `- ${criterion}`).join("\n")}\n\nTask outputs:\n${JSON.stringify(outputs, null, 2)}\n\nLocal verification:\n${JSON.stringify(localResults, null, 2)}\n\nCurrent changed file contents:\n${JSON.stringify(fileState, null, 2)}`
+        content: `Goal:\n${goal}\n\nSuccess criteria:\n${plan.successCriteria.map((criterion) => `- ${criterion}`).join("\n")}\n\nTask outputs:\n${JSON.stringify(outputs, null, 2)}\n\nTask execution receipts:\n${JSON.stringify(this.taskReceipts, null, 2)}\n\nLocal verification:\n${JSON.stringify(localResults, null, 2)}\n\nCurrent changed file contents:\n${JSON.stringify(fileState, null, 2)}`
       }]
     }, qaSchema) as QaResult;
   }
@@ -188,12 +209,16 @@ export class PhaseExecutor {
     return [...this.modelUsage.values()].sort((a, b) => a.role.localeCompare(b.role));
   }
 
-  verificationMetrics(): { localVerificationCount: number; localVerificationFailureCount: number } {
+  verificationMetrics(): { localVerificationCount: number; localVerificationFailureCount: number; taskVerificationCount: number; taskVerificationFailureCount: number } {
     return { ...this.lastVerificationSummary };
   }
 
   snapshotReviews(): ReviewBundle[] {
     return [...this.reviews];
+  }
+
+  snapshotTaskReceipts(): TaskExecutionReceipt[] {
+    return [...this.taskReceipts];
   }
 
   private async callJson<T>(
@@ -251,6 +276,62 @@ export class PhaseExecutor {
         content: `Task:\n${JSON.stringify(task, null, 2)}\n\nSuccess criteria:\n${plan.successCriteria.map((criterion) => `- ${criterion}`).join("\n")}\n\nRelevant snippets:\n${snippets}\n\nPrior outputs:\n${JSON.stringify(priorOutputs, null, 2)}`
       }]
     }, taskOutputSchema) as TaskOutput;
+  }
+
+  private async buildTaskReceipt(
+    task: PlanTask,
+    output: TaskOutput,
+    review: ReviewBundle
+  ): Promise<TaskExecutionReceipt> {
+    const verificationResults: CommandReceipt[] = [];
+    for (const command of task.verificationCommands) {
+      const result = await executeShell(command, this.workdir, this.config.execution.timeoutMs);
+      verificationResults.push({
+        command: result.command,
+        exitCode: result.exitCode,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        durationMs: result.durationMs
+      });
+    }
+
+    const failingResults = verificationResults.filter((result) => result.exitCode !== 0);
+    if (failingResults.length > 0) {
+      return {
+        taskId: task.id,
+        status: "error",
+        summary: `Applied edits for ${task.id}, but ${failingResults.length} task verification command(s) failed.`,
+        requiredTools: task.requiredTools,
+        verificationCommands: task.verificationCommands,
+        verificationResults,
+        artifacts: [...output.fileEdits.map((edit) => edit.path), review.reviewPath, review.patchPath],
+        nextActions: [`Inspect the failing task verification command output for ${task.id}.`]
+      };
+    }
+
+    if (task.verificationCommands.length === 0) {
+      return {
+        taskId: task.id,
+        status: "warning",
+        summary: `Applied edits for ${task.id}, but no task-level verification commands were provided.`,
+        requiredTools: task.requiredTools,
+        verificationCommands: [],
+        verificationResults: [],
+        artifacts: [...output.fileEdits.map((edit) => edit.path), review.reviewPath, review.patchPath],
+        nextActions: ["Add verificationCommands to this task for stronger local evidence."]
+      };
+    }
+
+    return {
+      taskId: task.id,
+      status: "success",
+      summary: `Applied edits for ${task.id} and passed all task-level verification commands.`,
+      requiredTools: task.requiredTools,
+      verificationCommands: task.verificationCommands,
+      verificationResults,
+      artifacts: [...output.fileEdits.map((edit) => edit.path), review.reviewPath, review.patchPath],
+      nextActions: []
+    };
   }
 
   private recordModelUsage(

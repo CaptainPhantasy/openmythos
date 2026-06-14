@@ -16,10 +16,16 @@ test("Runner completes a full deterministic fake-adapter run", async () => {
   const marker = await readFile(resolve(workdir, "openmythos-fake-output.txt"), "utf8");
   const state = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "state.json"), "utf8")) as { status: string };
   const qa = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "qa.json"), "utf8")) as { passed: boolean };
+  const execution = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "execution.json"), "utf8")) as Array<{
+    status: string;
+    verificationCommands: string[];
+  }>;
   const metrics = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "metrics.json"), "utf8")) as {
     status: string;
     contextFileCount: number;
     taskCount: number;
+    taskVerificationCount: number;
+    taskVerificationFailureCount: number;
     modelUsage: Array<{ role: string; calls: number }>;
   };
 
@@ -27,12 +33,43 @@ test("Runner completes a full deterministic fake-adapter run", async () => {
   assert.equal(marker, "OPENMYTHOS_FAKE_SUCCESS\n");
   assert.equal(state.status, "completed");
   assert.equal(qa.passed, true);
+  assert.equal(execution[0]?.status, "success");
+  assert.equal(execution[0]?.verificationCommands.length, 2);
   assert.equal(metrics.status, "completed");
   assert.equal(metrics.taskCount, 1);
+  assert.equal(metrics.taskVerificationCount, 2);
+  assert.equal(metrics.taskVerificationFailureCount, 0);
   assert.ok(metrics.contextFileCount >= 0);
   assert.ok(metrics.modelUsage.length > 0);
   assert.ok(metrics.modelUsage.some((entry) => entry.role === "planner" && entry.calls >= 1));
   assert.ok(result.artifacts.some((artifact) => artifact.endsWith("issue.json")) === false);
+});
+
+test("Runner fails when task-level verification commands fail", async () => {
+  const workdir = await mkdtemp(join(tmpdir(), "openmythos-fake-task-verify-"));
+  const config = await loadConfigWithOptionalProfile(resolve("openmythos.config.json"), "fake");
+  config.execution.maxRetries = 0;
+  const runner = new Runner(config, new StateStore(resolve(workdir, "runs")), workdir);
+
+  const result = await runner.run("failing task verification");
+  const qa = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "qa.json"), "utf8")) as {
+    passed: boolean;
+    issues: Array<{ description: string }>;
+  };
+  const execution = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "execution.json"), "utf8")) as Array<{
+    status: string;
+  }>;
+  const metrics = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "metrics.json"), "utf8")) as {
+    status: string;
+    taskVerificationFailureCount: number;
+  };
+
+  assert.equal(result.status, "failed");
+  assert.equal(qa.passed, false);
+  assert.equal(execution[0]?.status, "error");
+  assert.equal(metrics.status, "failed");
+  assert.equal(metrics.taskVerificationFailureCount, 1);
+  assert.match(qa.issues[0]?.description ?? "", /Task verification failed/);
 });
 
 test("Runner can stop in awaiting_approval before applying risky edits", async () => {

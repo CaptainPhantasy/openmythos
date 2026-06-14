@@ -7,6 +7,8 @@ import type { ModelUsageMetric, RunMetrics, RunState } from "../state/types.js";
 export interface VerificationMetrics {
   localVerificationCount: number;
   localVerificationFailureCount: number;
+  taskVerificationCount: number;
+  taskVerificationFailureCount: number;
 }
 
 export function buildRunMetrics(input: {
@@ -41,6 +43,8 @@ export function buildRunMetrics(input: {
     blockingReviewCount: input.reviews.filter((review) => review.blocking).length,
     localVerificationCount: input.verification.localVerificationCount,
     localVerificationFailureCount: input.verification.localVerificationFailureCount,
+    taskVerificationCount: input.verification.taskVerificationCount,
+    taskVerificationFailureCount: input.verification.taskVerificationFailureCount,
     qaPassed: input.qa?.passed ?? null,
     qaScore: input.qa?.score ?? null,
     modelUsage: input.modelUsage
@@ -59,6 +63,8 @@ export interface BenchmarkSummary {
   totalModelCalls: number;
   totalFileEdits: number;
   totalPatchEdits: number;
+  totalTaskVerificationCount: number;
+  totalTaskVerificationFailures: number;
 }
 
 export function summarizeBench(metrics: RunMetrics[]): BenchmarkSummary {
@@ -88,7 +94,9 @@ export function summarizeBench(metrics: RunMetrics[]): BenchmarkSummary {
     totalOutputTokens: modelUsage.reduce((sum, usage) => sum + usage.outputTokens, 0),
     totalModelCalls: modelUsage.reduce((sum, usage) => sum + usage.calls, 0),
     totalFileEdits: metrics.reduce((sum, metric) => sum + metric.fileEditCount, 0),
-    totalPatchEdits: metrics.reduce((sum, metric) => sum + metric.patchEditCount, 0)
+    totalPatchEdits: metrics.reduce((sum, metric) => sum + metric.patchEditCount, 0),
+    totalTaskVerificationCount: metrics.reduce((sum, metric) => sum + metric.taskVerificationCount, 0),
+    totalTaskVerificationFailures: metrics.reduce((sum, metric) => sum + metric.taskVerificationFailureCount, 0)
   };
 }
 

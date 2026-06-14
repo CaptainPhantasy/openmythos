@@ -53,6 +53,8 @@ export interface RunMetrics {
   blockingReviewCount: number;
   localVerificationCount: number;
   localVerificationFailureCount: number;
+  taskVerificationCount: number;
+  taskVerificationFailureCount: number;
   qaPassed: boolean | null;
   qaScore: number | null;
   modelUsage: ModelUsageMetric[];

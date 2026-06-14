@@ -48,6 +48,8 @@ test("renderDashboard displays run and recent event state", () => {
       blockingReviewCount: 0,
       localVerificationCount: 1,
       localVerificationFailureCount: 0,
+      taskVerificationCount: 2,
+      taskVerificationFailureCount: 0,
       qaPassed: true,
       qaScore: 100,
       modelUsage: [{
@@ -77,6 +79,8 @@ test("renderDashboard displays run and recent event state", () => {
       blockingReviewCount: 0,
       localVerificationCount: 1,
       localVerificationFailureCount: 0,
+      taskVerificationCount: 2,
+      taskVerificationFailureCount: 0,
       qaPassed: true,
       qaScore: 100,
       modelUsage: [{

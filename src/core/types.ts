@@ -34,7 +34,27 @@ export interface PlanTask {
   fileTargets: string[];
   acceptanceCriteria: string[];
   requiredTools: string[];
+  verificationCommands: string[];
   executionMode: "parallel" | "serial";
+}
+
+export interface CommandReceipt {
+  command: string;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  durationMs: number;
+}
+
+export interface TaskExecutionReceipt {
+  taskId: string;
+  status: "success" | "warning" | "error";
+  summary: string;
+  requiredTools: string[];
+  verificationCommands: string[];
+  verificationResults: CommandReceipt[];
+  artifacts: string[];
+  nextActions: string[];
 }
 
 export interface FileEdit {

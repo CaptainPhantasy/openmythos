@@ -35,7 +35,8 @@ export function renderDashboard(model: DashboardModel, selectedIndex = 0): strin
   lines.push("Bench Summary");
   lines.push(`  runs=${bench.runCount} completed=${bench.completedCount} failed=${bench.failedCount} awaiting=${bench.awaitingApprovalCount}`);
   lines.push(`  avg_duration_ms=${bench.averageDurationMs} avg_qa=${bench.averageQaScore ?? "-"} model_calls=${bench.totalModelCalls}`);
-  lines.push(`  file_edits=${bench.totalFileEdits} patch_edits=${bench.totalPatchEdits} input_tokens=${bench.totalInputTokens} output_tokens=${bench.totalOutputTokens}`);
+  lines.push(`  file_edits=${bench.totalFileEdits} patch_edits=${bench.totalPatchEdits} task_verification=${bench.totalTaskVerificationCount} failed_task_verification=${bench.totalTaskVerificationFailures}`);
+  lines.push(`  input_tokens=${bench.totalInputTokens} output_tokens=${bench.totalOutputTokens}`);
   lines.push("");
   lines.push("Runs");
 
@@ -76,6 +77,7 @@ export function renderDashboard(model: DashboardModel, selectedIndex = 0): strin
     lines.push(`  edits: ${model.selectedMetrics.fileEditCount} patch=${model.selectedMetrics.patchEditCount} delete=${model.selectedMetrics.deleteEditCount}`);
     lines.push(`  reviews: high=${model.selectedMetrics.highRiskReviewCount} blocking=${model.selectedMetrics.blockingReviewCount}`);
     lines.push(`  local_verification: total=${model.selectedMetrics.localVerificationCount} failed=${model.selectedMetrics.localVerificationFailureCount}`);
+    lines.push(`  task_verification: total=${model.selectedMetrics.taskVerificationCount} failed=${model.selectedMetrics.taskVerificationFailureCount}`);
     if (model.selectedMetrics.modelUsage.length > 0) {
       lines.push("  model usage:");
       for (const usage of model.selectedMetrics.modelUsage.slice(0, 6)) {

@@ -142,7 +142,8 @@ export class Runner {
         const executeStarted = Date.now();
         outputs = await executor.execute(plan, context);
         await this.store.writeArtifact(runId, "outputs.json", outputs);
-        await this.event(runId, "execute", "execute_tasks", "success", `${outputs.length} task outputs applied`, ["outputs.json"], Date.now() - executeStarted);
+        await this.store.writeArtifact(runId, "execution.json", executor.snapshotTaskReceipts());
+        await this.event(runId, "execute", "execute_tasks", "success", `${outputs.length} task outputs applied`, ["outputs.json", "execution.json"], Date.now() - executeStarted);
 
         await this.store.updatePhase(runId, "verify");
         const verifyStarted = Date.now();
@@ -258,6 +259,7 @@ export class Runner {
       "context.json",
       "plan.json",
       "outputs.json",
+      "execution.json",
       "qa.json",
       "issue.json",
       "pull-request.json",

@@ -114,6 +114,7 @@ export const planTaskSchema = z.object({
   fileTargets: stringListSchema.default([]),
   acceptanceCriteria: stringListSchema.refine((items) => items.length > 0, "Expected at least one acceptance criterion"),
   requiredTools: stringListSchema.default([]),
+  verificationCommands: stringListSchema.default([]),
   executionMode: z.enum(["parallel", "serial"]).default("serial")
 });
 
