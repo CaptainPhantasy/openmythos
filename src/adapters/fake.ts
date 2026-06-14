@@ -45,6 +45,7 @@ export class FakeAdapter implements ModelAdapter {
       const harnessStatusAction = request.messages.some((message) => message.content.includes("harness git status action"));
       const taskScopedRetrieval = request.messages.some((message) => message.content.includes("task scoped retrieval"));
       const modelToolLoop = request.messages.some((message) => message.content.includes("model tool loop"));
+      const modelVerificationCommandLoop = request.messages.some((message) => message.content.includes("model verification command loop"));
       const successCriteria = harnessStatusAction
         ? [
             "Git status context is captured",
@@ -91,6 +92,27 @@ export class FakeAdapter implements ModelAdapter {
                 verificationCommands: ["test -f openmythos-fake-output.txt", "grep -qx 'OPENMYTHOS_FAKE_SUCCESS' openmythos-fake-output.txt"],
                 executionMode: "serial",
                 acceptanceCriteria: [
+                  "The file exists",
+                  "The file contains OPENMYTHOS_FAKE_SUCCESS"
+                ]
+              }
+            ]
+          : modelVerificationCommandLoop
+          ? [
+              {
+                id: "task-1",
+                title: "Create fake output marker after command-backed verification",
+                description: "Request a declared verification command before producing the final file edit.",
+                role: "coder",
+                executor: "model",
+                harnessAction: null,
+                contextQueries: [],
+                fileTargets: ["src/example.ts", "openmythos-fake-output.txt"],
+                requiredTools: ["verification.command", "filesystem.write"],
+                verificationCommands: ["grep -qx 'PRECHECK_OK' src/example.ts", "test -f openmythos-fake-output.txt"],
+                executionMode: "serial",
+                acceptanceCriteria: [
+                  "The precheck command succeeds",
                   "The file exists",
                   "The file contains OPENMYTHOS_FAKE_SUCCESS"
                 ]
@@ -197,8 +219,24 @@ export class FakeAdapter implements ModelAdapter {
 
     if (request.system.includes("implement one planned task") || request.system.includes("review and correct one planned task")) {
       const modelToolLoop = request.messages.some((message) => message.content.includes("Create fake output marker through model tool loop"));
+      const modelVerificationCommandLoop = request.messages.some((message) => message.content.includes("Create fake output marker after command-backed verification"));
       const hasToolResults = request.messages.some((message) => message.content.includes("Tool results for the previous request:"));
       const taskId = request.messages.some((message) => message.content.includes('"id": "task-2"')) ? "task-2" : "task-1";
+      if (modelVerificationCommandLoop && !hasToolResults) {
+        return {
+          taskId,
+          status: "tool",
+          fileEdits: [],
+          summary: "Need command-backed local evidence before writing the marker file.",
+          errors: [],
+          toolRequests: [
+            {
+              tool: "verification.command",
+              input: { command: "grep -qx 'PRECHECK_OK' src/example.ts" }
+            }
+          ]
+        };
+      }
       if (modelToolLoop && !hasToolResults) {
         return {
           taskId,

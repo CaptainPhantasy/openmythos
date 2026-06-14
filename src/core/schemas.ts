@@ -160,10 +160,11 @@ export const fileEditSchema = z.object({
 });
 
 export const taskToolRequestSchema = z.object({
-  tool: z.enum(["filesystem.read", "filesystem.search", "code.symbols", "git.status", "git.diff"]),
+  tool: z.enum(["filesystem.read", "filesystem.search", "code.symbols", "git.status", "git.diff", "verification.command"]),
   input: z.object({
     query: z.string().optional(),
-    paths: stringListSchema.optional()
+    paths: stringListSchema.optional(),
+    command: z.string().min(1).optional()
   }).default({})
 });
 

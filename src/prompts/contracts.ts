@@ -32,6 +32,7 @@ status must be exactly one of: tool, success, partial, failed.
 fileEdits must be a JSON array. Use [] only when no file should be changed.
 errors must be a JSON array of strings. Use [] when there are no errors.
 toolRequests must be a JSON array. Use [] when you are returning a final task result.
+For verification.command requests, input.command must exactly match one of the task's declared verificationCommands.
 For create and modify file edits, content must be the complete target file content.
 You may use action="patch" only for existing files when you can provide a valid unified diff with @@ hunk headers as content.
 Use status="tool" only when you need the harness to gather more evidence before you can finish. When status="tool", fileEdits must be [] and toolRequests must contain one or more allowed tool calls.
@@ -42,6 +43,7 @@ Return valid JSON only. Do not include markdown.
 Use these keys exactly: taskId, status, fileEdits, summary, errors, toolRequests.
 status must be exactly one of: tool, success, partial, failed.
 fileEdits, errors, and toolRequests must be JSON arrays.
+For verification.command requests, input.command must exactly match one of the task's declared verificationCommands.
 Only include fileEdits when you are providing complete corrected file content or a valid unified diff patch for an existing file.
 Use status="tool" only when you need the harness to gather more evidence before you can finish. When status="tool", fileEdits must be [] and toolRequests must contain one or more allowed tool calls.
 Focus on correctness, safety, schema compliance, and testability.`;
@@ -51,6 +53,7 @@ Return valid JSON only. Do not include markdown.
 Use these keys exactly: taskId, status, fileEdits, summary, errors, toolRequests.
 status must be exactly one of: tool, success, partial, failed.
 fileEdits, errors, and toolRequests must be JSON arrays.
+For verification.command requests, input.command must exactly match one of the task's declared verificationCommands.
 Verifier tasks should normally return fileEdits=[] unless the task explicitly requires a verifier-authored patch.
 Use status="tool" only when you need the harness to gather more evidence before you can finish. When status="tool", fileEdits must be [] and toolRequests must contain one or more allowed tool calls.
 Base your summary and errors on concrete repository evidence, local command output, and provided file contents.`;

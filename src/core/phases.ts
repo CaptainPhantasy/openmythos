@@ -754,6 +754,45 @@ export class PhaseExecutor {
           }
           break;
         }
+        case "verification.command": {
+          const requestedCommand = request.input.command?.trim() ?? "";
+          if (requestedCommand.length === 0) {
+            observations.push({
+              kind: "verification.command",
+              status: "warning",
+              summary: "verification.command request omitted command.",
+              content: "Provide one exact command string in input.command.",
+              nextActions: ["Retry verification.command with one of the task's declared verificationCommands."],
+              artifacts: []
+            });
+            break;
+          }
+          if (!task.verificationCommands.includes(requestedCommand)) {
+            observations.push({
+              kind: "verification.command",
+              status: "error",
+              summary: "Requested verification command is not allowed for this task.",
+              content: `Allowed verification commands: ${task.verificationCommands.join(" || ")}`,
+              nextActions: ["Retry with an exact command from the task's declared verificationCommands."],
+              artifacts: []
+            });
+            break;
+          }
+          const result = await executeShell(requestedCommand, this.workdir, this.config.execution.timeoutMs);
+          observations.push({
+            kind: "verification.command",
+            status: result.exitCode === 0 ? "success" : "warning",
+            summary: result.exitCode === 0
+              ? `Verification command passed: ${requestedCommand}`
+              : `Verification command failed: ${requestedCommand}`,
+            content: [result.stdout, result.stderr].filter(Boolean).join("\n").trim() || `(exit ${result.exitCode})`,
+            nextActions: result.exitCode === 0
+              ? []
+              : ["Inspect the command output, fix the failing condition, or choose another declared verification command."],
+            artifacts: []
+          });
+          break;
+        }
       }
     }
     return observations;

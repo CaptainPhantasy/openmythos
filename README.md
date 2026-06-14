@@ -265,6 +265,9 @@ Plan task contract:
 - planners can specify `verificationCommands` for task-level local evidence
 - model-executed tasks can request bounded read-only tool turns, and the
   harness enforces `execution.maxTaskToolTurns` as a hard stop condition
+- model-executed tasks can request `verification.command` during bounded tool
+  turns, but only for exact commands already declared in the task's
+  `verificationCommands` allowlist
 - `requiredTools` are normalized against a deterministic harness catalog and
   repaired or rejected when they reference unsupported or role-mismatched tools
 - model-executed tasks can now request deterministic repository search and

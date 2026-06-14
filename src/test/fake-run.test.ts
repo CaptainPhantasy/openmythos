@@ -265,3 +265,33 @@ test("Runner supports bounded tool-use turns inside a model task", async () => {
   assert.equal(metrics.modelToolTurnCount, 1);
   assert.equal(metrics.modelToolCallCount, 2);
 });
+
+test("Runner supports planner-declared verification.command requests inside a model task", async () => {
+  const workdir = await mkdtemp(join(tmpdir(), "openmythos-fake-command-loop-"));
+  await mkdir(resolve(workdir, "src"), { recursive: true });
+  await writeFile(resolve(workdir, "src", "example.ts"), "PRECHECK_OK\n", "utf8");
+
+  const config = await loadConfigWithOptionalProfile(resolve("openmythos.config.json"), "fake");
+  const runner = new Runner(config, new StateStore(resolve(workdir, "runs")), workdir);
+
+  const result = await runner.run("model verification command loop");
+  const execution = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "execution.json"), "utf8")) as Array<{
+    taskId: string;
+    toolTurnCount: number;
+    toolCallCount: number;
+    observations: Array<{ kind: string; status: string; summary: string; nextActions: string[] }>;
+  }>;
+  const marker = await readFile(resolve(workdir, "openmythos-fake-output.txt"), "utf8");
+
+  assert.equal(result.status, "completed");
+  assert.equal(marker, "OPENMYTHOS_FAKE_SUCCESS\n");
+  assert.equal(execution[0]?.taskId, "task-1");
+  assert.equal(execution[0]?.toolTurnCount, 1);
+  assert.equal(execution[0]?.toolCallCount, 1);
+  assert.ok(execution[0]?.observations.some((observation) =>
+    observation.kind === "verification.command"
+    && observation.status === "success"
+    && /grep -qx 'PRECHECK_OK' src\/example\.ts/.test(observation.summary)
+    && observation.nextActions.length === 0
+  ));
+});

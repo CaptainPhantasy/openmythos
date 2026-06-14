@@ -58,10 +58,11 @@ export interface CommandReceipt {
 }
 
 export interface TaskToolRequest {
-  tool: "filesystem.read" | "filesystem.search" | "code.symbols" | "git.status" | "git.diff";
+  tool: "filesystem.read" | "filesystem.search" | "code.symbols" | "git.status" | "git.diff" | "verification.command";
   input: {
     query?: string;
     paths?: string[];
+    command?: string;
   };
 }
 
