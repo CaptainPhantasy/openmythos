@@ -30,6 +30,7 @@ exhausted.
 - Bounded JSON repair retry with raw invalid-response artifacts.
 - Patch-safe file edits plus review artifacts before apply.
 - Approval policy for risky file actions before apply.
+- Governance preflight for git-required mode, dirty-worktree policy, and protected branches.
 - Local verification commands before model QA.
 - Structured `review` command for local git diffs with machine-readable findings.
 - Adapter profiles for fake, Z.AI GLM coding, and frontier model experiments.
@@ -172,8 +173,20 @@ Approval policy:
 - `approval.mode = "enforce"` stops the run with `awaiting_approval` when a task
   proposes high-risk edits such as deletes, protected-path writes, or
   credential-like file changes.
+- secret-like content in proposed edits is treated as high risk and enters the
+  same review/approval path.
 - Review artifacts are written into each run directory as `review-<task>.json`
   and `review-<task>.patch`.
+
+Governance policy:
+
+- `governance.requireGitRepo` can require repository-backed runs.
+- `governance.dirtyWorktree` controls how the harness handles a dirty tree:
+  `allow`, `warn`, or `block`.
+- `governance.protectedBranchMode` applies the same policy to protected branch
+  matches from `governance.protectedBranches`.
+- governance preflight runs before model phases and writes a `governance.json`
+  artifact into the run directory.
 
 ## Runtime Artifacts
 
@@ -186,6 +199,8 @@ Each run writes an inspectable artifact set:
 - `plan.json`: schema-validated execution plan.
 - `outputs.json`: schema-validated worker outputs and file edits.
 - `qa.json`: local and model verification result.
+- `governance.json`: repository preflight result, including dirty-tree and
+  branch-policy findings.
 - `metrics.json`: retained run metrics, including model calls, token totals,
   durations, edit counts, and verification counts.
 - `final.md`: final execution report.

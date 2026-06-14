@@ -32,7 +32,7 @@ const querySchema = z.object({
 
 const health = {
   name: "openmythos-void-terminal",
-  version: "0.3.0",
+  version: "0.4.0",
   websocket: "/ws/terminal",
   ui: "/",
 };

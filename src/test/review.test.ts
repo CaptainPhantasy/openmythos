@@ -10,7 +10,10 @@ const approval: OpenMythosConfig["approval"] = {
   mode: "enforce",
   protectedPaths: ["package.json", ".env*"],
   highRiskExtensions: [".pem", ".key"],
-  dependencyManifestPaths: ["package.json"]
+  dependencyManifestPaths: ["package.json"],
+  secretPatterns: [
+    "sk-[A-Za-z0-9_-]{12,}"
+  ]
 };
 
 test("createReviewBundle writes patch and marks protected or destructive edits as high risk", async () => {
@@ -52,5 +55,31 @@ test("createReviewBundle writes patch and marks protected or destructive edits a
   assert.deepEqual(
     metadata.reviews.find((entry) => entry.path === "delete-me.txt")?.risk.reasons,
     ["delete action"]
+  );
+});
+
+test("createReviewBundle marks secret-like content as high risk", async () => {
+  const workdir = await mkdtemp(join(tmpdir(), "openmythos-review-secret-"));
+  const runDir = resolve(workdir, "runs", "run-2");
+
+  const review = await createReviewBundle(workdir, runDir, "task-2", [
+    {
+      path: "src/secrets.ts",
+      action: "create",
+      content: "export const token = \"sk-secretsecretsecret\";\n",
+      description: "create secret-bearing file"
+    }
+  ], approval);
+
+  const metadata = JSON.parse(await readFile(review.reviewPath, "utf8")) as {
+    highestRisk: string;
+    blocking: boolean;
+    reviews: Array<{ path: string; risk: { level: string; reasons: string[] } }>;
+  };
+
+  assert.equal(metadata.highestRisk, "high");
+  assert.deepEqual(
+    metadata.reviews.find((entry) => entry.path === "src/secrets.ts")?.risk.reasons,
+    ["secret-like content detected"]
   );
 });

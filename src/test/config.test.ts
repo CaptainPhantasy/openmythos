@@ -22,4 +22,5 @@ test("loadConfig validates a minimal valid config", async () => {
   assert.equal(config.execution.maxRetries, 3);
   assert.equal(config.models.planner.maxTokens, 4096);
   assert.equal(config.approval.mode, "off");
+  assert.equal(config.governance.dirtyWorktree, "warn");
 });

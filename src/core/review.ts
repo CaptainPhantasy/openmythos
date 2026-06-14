@@ -94,6 +94,10 @@ function assessEditRisk(
     reasons.push("high-risk file extension");
   }
 
+  if (approval.secretPatterns.some((pattern) => matchesContent(edit.content, pattern))) {
+    reasons.push("secret-like content detected");
+  }
+
   if (edit.path.startsWith(".")) {
     reasons.push("hidden root path");
   }
@@ -105,7 +109,8 @@ function assessEditRisk(
   const level: EditReview["risk"]["level"] = reasons.some((reason) =>
     reason === "delete action" ||
     reason === "protected path matched" ||
-    reason === "high-risk file extension"
+    reason === "high-risk file extension" ||
+    reason === "secret-like content detected"
   )
     ? "high"
     : reasons.length > 0
@@ -166,4 +171,12 @@ function matchesPath(path: string, pattern: string): boolean {
     return new RegExp(`^${escaped}$`).test(path);
   }
   return path === pattern;
+}
+
+function matchesContent(content: string, pattern: string): boolean {
+  try {
+    return new RegExp(pattern, "m").test(content);
+  } catch {
+    return content.includes(pattern);
+  }
 }

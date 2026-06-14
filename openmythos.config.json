@@ -137,5 +137,15 @@
       "openmythos.config.json",
       "profiles/*.json"
     ]
+  },
+  "governance": {
+    "requireGitRepo": false,
+    "dirtyWorktree": "warn",
+    "protectedBranchMode": "warn",
+    "protectedBranches": [
+      "main",
+      "master",
+      "release/*"
+    ]
   }
 }

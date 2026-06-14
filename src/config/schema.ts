@@ -29,6 +29,7 @@ export const rateLimitConfigSchema = z.object({
 }).optional();
 
 export const approvalModeSchema = z.enum(["off", "suggest", "enforce"]);
+export const governanceModeSchema = z.enum(["allow", "warn", "block"]);
 
 export const approvalConfigSchema = z.object({
   mode: approvalModeSchema.default("off"),
@@ -51,6 +52,25 @@ export const approvalConfigSchema = z.object({
     "pyproject.toml",
     "requirements.txt",
     "poetry.lock"
+  ]),
+  secretPatterns: z.array(z.string()).default([
+    "sk-[A-Za-z0-9_-]{12,}",
+    "ghp_[A-Za-z0-9]{20,}",
+    "github_pat_[A-Za-z0-9_]{20,}",
+    "AIza[0-9A-Za-z\\-_]{20,}",
+    "AKIA[0-9A-Z]{16}",
+    "-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----"
+  ])
+}).default({});
+
+export const governanceConfigSchema = z.object({
+  requireGitRepo: z.boolean().default(false),
+  dirtyWorktree: governanceModeSchema.default("warn"),
+  protectedBranchMode: governanceModeSchema.default("warn"),
+  protectedBranches: z.array(z.string()).default([
+    "main",
+    "master",
+    "release/*"
   ])
 }).default({});
 
@@ -88,7 +108,8 @@ export const openMythosConfigSchema = z.object({
     localCommands: z.array(z.string()).default([]),
     requireLocalPassBeforeModelQa: z.boolean().default(true)
   }).default({}),
-  approval: approvalConfigSchema
+  approval: approvalConfigSchema,
+  governance: governanceConfigSchema
 });
 
 export type OpenMythosConfig = z.infer<typeof openMythosConfigSchema>;

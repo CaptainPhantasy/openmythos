@@ -5,6 +5,7 @@ import { AdapterRegistry } from "../adapters/registry.js";
 import { StateStore } from "../state/store.js";
 import { buildFinalReport } from "./report.js";
 import { PhaseExecutor } from "./phases.js";
+import { evaluateGovernance, GovernanceViolationError } from "./governance.js";
 import { ApprovalRequiredError } from "./review.js";
 import { buildRunMetrics } from "./metrics.js";
 import type { ContextResult, IntakeResult, Plan, QaResult, TaskOutput } from "./types.js";
@@ -24,9 +25,10 @@ export class Runner {
   ) {}
 
   async run(goal: string): Promise<RunResult> {
+    const governance = await evaluateGovernance(this.config, this.workdir);
     const runId = randomUUID();
     await this.store.createRun(runId, goal, this.config.execution.maxRetries);
-    return this.executeFrom(runId, goal);
+    return this.executeFrom(runId, goal, governance);
   }
 
   async resume(runId: string): Promise<RunResult> {
@@ -48,7 +50,11 @@ export class Runner {
     return this.executeFrom(runId, state.goal);
   }
 
-  private async executeFrom(runId: string, goal: string): Promise<RunResult> {
+  private async executeFrom(
+    runId: string,
+    goal: string,
+    governanceSeed?: Awaited<ReturnType<typeof evaluateGovernance>>
+  ): Promise<RunResult> {
     const runDir = this.store.runDir(runId);
     const executor = new PhaseExecutor(this.config, new AdapterRegistry(this.config), this.workdir, runDir);
     const started = Date.now();
@@ -58,8 +64,31 @@ export class Runner {
     let plan = await this.store.readArtifact<Plan>(runId, "plan.json");
     let outputs = await this.store.readArtifact<TaskOutput[]>(runId, "outputs.json");
     let qa = await this.store.readArtifact<QaResult>(runId, "qa.json");
+    let governance = await this.store.readArtifact<Awaited<ReturnType<typeof evaluateGovernance>>>(runId, "governance.json");
 
     try {
+      if (!governance) {
+        governance = governanceSeed ?? await evaluateGovernance(this.config, this.workdir);
+        await this.store.writeArtifact(runId, "governance.json", governance);
+        await this.event(
+          runId,
+          "intake",
+          "governance_preflight",
+          governance.blocked ? "error" : governance.issues.length > 0 ? "warning" : "success",
+          governance.blocked
+            ? "Governance preflight blocked the run."
+            : governance.issues.length > 0
+              ? "Governance preflight found warnings."
+              : "Governance preflight passed.",
+          ["governance.json"],
+          Date.now() - started,
+          governance.blocked ? governance.issues.map((issue) => issue.message).join(" ") : undefined
+        );
+        if (governance.blocked) {
+          throw new GovernanceViolationError(governance);
+        }
+      }
+
       if (!intake) {
         await this.store.updatePhase(runId, "intake");
         intake = await executor.intake(goal);
@@ -137,6 +166,16 @@ export class Runner {
         artifacts: await this.artifacts(runId)
       };
     } catch (error) {
+      if (error instanceof GovernanceViolationError) {
+        await this.store.fail(runId, error.message);
+        await this.writeMetrics(runId, executor, context, plan, outputs, qa);
+        return {
+          runId,
+          status: "failed",
+          finalOutput: null,
+          artifacts: await this.artifacts(runId)
+        };
+      }
       if (error instanceof ApprovalRequiredError) {
         await this.store.awaitApproval(runId, error.message);
         await this.event(
@@ -196,6 +235,7 @@ export class Runner {
       "plan.json",
       "outputs.json",
       "qa.json",
+      "governance.json",
       "metrics.json",
       "final.md"
     ].map((file) => resolve(root, file));
