@@ -46,7 +46,13 @@ export class FakeAdapter implements ModelAdapter {
       const taskScopedRetrieval = request.messages.some((message) => message.content.includes("task scoped retrieval"));
       const modelToolLoop = request.messages.some((message) => message.content.includes("model tool loop"));
       const modelVerificationCommandLoop = request.messages.some((message) => message.content.includes("model verification command loop"));
-      const successCriteria = harnessStatusAction
+      const dependencyScopedHandoff = request.messages.some((message) => message.content.includes("dependency scoped handoff"));
+      const successCriteria = dependencyScopedHandoff
+        ? [
+            "handoff-report.txt exists",
+            "handoff-report.txt contains DEPENDENCY_HANDOFF_OK"
+          ]
+        : harnessStatusAction
         ? [
             "Git status context is captured",
             "The harness verification command succeeds"
@@ -95,6 +101,51 @@ export class FakeAdapter implements ModelAdapter {
                   "The file exists",
                   "The file contains OPENMYTHOS_FAKE_SUCCESS"
                 ]
+              }
+            ]
+          : dependencyScopedHandoff
+          ? [
+              {
+                id: "task-1",
+                title: "Create alpha marker",
+                description: "Create the alpha marker file for downstream dependent work.",
+                role: "coder",
+                executor: "model",
+                harnessAction: null,
+                contextQueries: [],
+                fileTargets: ["alpha.txt"],
+                requiredTools: ["filesystem.write"],
+                verificationCommands: ["test -f alpha.txt"],
+                executionMode: "parallel",
+                acceptanceCriteria: ["alpha.txt exists"]
+              },
+              {
+                id: "task-2",
+                title: "Create beta marker",
+                description: "Create the beta marker file that should not be handed to unrelated dependent work.",
+                role: "coder",
+                executor: "model",
+                harnessAction: null,
+                contextQueries: [],
+                fileTargets: ["beta.txt"],
+                requiredTools: ["filesystem.write"],
+                verificationCommands: ["test -f beta.txt"],
+                executionMode: "parallel",
+                acceptanceCriteria: ["beta.txt exists"]
+              },
+              {
+                id: "task-3",
+                title: "Create dependency handoff report",
+                description: "Use only the declared dependency handoff context to create the final report.",
+                role: "coder",
+                executor: "model",
+                harnessAction: null,
+                contextQueries: [],
+                fileTargets: ["handoff-report.txt"],
+                requiredTools: ["filesystem.write"],
+                verificationCommands: ["test -f handoff-report.txt", "grep -qx 'DEPENDENCY_HANDOFF_OK' handoff-report.txt"],
+                executionMode: "serial",
+                acceptanceCriteria: ["handoff-report.txt exists", "handoff-report.txt contains DEPENDENCY_HANDOFF_OK"]
               }
             ]
           : modelVerificationCommandLoop
@@ -198,7 +249,11 @@ export class FakeAdapter implements ModelAdapter {
                 ]
               }
             ],
-        dependencies: verifierRouting || harnessExecutor ? { "task-2": ["task-1"] } : {},
+        dependencies: dependencyScopedHandoff
+          ? { "task-3": ["task-1"] }
+          : verifierRouting || harnessExecutor
+            ? { "task-2": ["task-1"] }
+            : {},
         successCriteria
       };
     }
@@ -220,8 +275,38 @@ export class FakeAdapter implements ModelAdapter {
     if (request.system.includes("implement one planned task") || request.system.includes("review and correct one planned task")) {
       const modelToolLoop = request.messages.some((message) => message.content.includes("Create fake output marker through model tool loop"));
       const modelVerificationCommandLoop = request.messages.some((message) => message.content.includes("Create fake output marker after command-backed verification"));
+      const dependencyHandoffReport = request.messages.some((message) => message.content.includes("Create dependency handoff report"));
       const hasToolResults = request.messages.some((message) => message.content.includes("Tool results for the previous request:"));
-      const taskId = request.messages.some((message) => message.content.includes('"id": "task-2"')) ? "task-2" : "task-1";
+      const taskId = request.messages.some((message) => message.content.includes('"id": "task-3"'))
+        ? "task-3"
+        : request.messages.some((message) => message.content.includes('"id": "task-2"'))
+          ? "task-2"
+          : "task-1";
+      if (dependencyHandoffReport) {
+        const dependencyOnlyAlpha = request.messages.some((message) =>
+          message.content.includes('"taskId": "task-1"')
+          && message.content.includes("alpha.txt")
+        );
+        const leaksBeta = request.messages.some((message) => message.content.includes('"taskId": "task-2"'))
+          || request.messages.some((message) => message.content.includes("beta.txt"));
+        return {
+          taskId,
+          status: dependencyOnlyAlpha && !leaksBeta ? "success" : "failed",
+          fileEdits: dependencyOnlyAlpha && !leaksBeta
+            ? [{
+                path: "handoff-report.txt",
+                action: "create",
+                content: "DEPENDENCY_HANDOFF_OK\n",
+                description: "Record that dependency-scoped handoff was correct"
+              }]
+            : [],
+          summary: dependencyOnlyAlpha && !leaksBeta
+            ? "Dependency-scoped handoff was limited to the declared upstream task."
+            : "Dependency-scoped handoff included unrelated task data.",
+          errors: dependencyOnlyAlpha && !leaksBeta ? [] : ["Dependency context was not scoped to the declared upstream tasks."],
+          toolRequests: []
+        };
+      }
       if (modelVerificationCommandLoop && !hasToolResults) {
         return {
           taskId,
@@ -259,19 +344,41 @@ export class FakeAdapter implements ModelAdapter {
       return {
         taskId,
         status: "success",
-        fileEdits: taskId === "task-2"
-          ? []
-          : [
+        fileEdits: request.messages.some((message) => message.content.includes("Create alpha marker"))
+          ? [
               {
-                path: "openmythos-fake-output.txt",
+                path: "alpha.txt",
                 action: "create",
-                content: "OPENMYTHOS_FAKE_SUCCESS\n",
-                description: "Create deterministic success marker"
+                content: "ALPHA\n",
+                description: "Create alpha marker"
               }
-            ],
-        summary: taskId === "task-2"
-          ? "Reviewed deterministic fake output marker."
-          : "Created deterministic fake output marker.",
+            ]
+          : request.messages.some((message) => message.content.includes("Create beta marker"))
+            ? [
+                {
+                  path: "beta.txt",
+                  action: "create",
+                  content: "BETA\n",
+                  description: "Create beta marker"
+                }
+              ]
+            : taskId === "task-2"
+              ? []
+              : [
+                  {
+                    path: "openmythos-fake-output.txt",
+                    action: "create",
+                    content: "OPENMYTHOS_FAKE_SUCCESS\n",
+                    description: "Create deterministic success marker"
+                  }
+                ],
+        summary: request.messages.some((message) => message.content.includes("Create alpha marker"))
+          ? "Created alpha marker."
+          : request.messages.some((message) => message.content.includes("Create beta marker"))
+            ? "Created beta marker."
+            : taskId === "task-2"
+              ? "Reviewed deterministic fake output marker."
+              : "Created deterministic fake output marker.",
         errors: [],
         toolRequests: []
       };
@@ -279,12 +386,18 @@ export class FakeAdapter implements ModelAdapter {
 
     if (request.system.includes("final QA gate")) {
       const harnessStatusAction = request.messages.some((message) => message.content.includes("Inspect git status via harness action"));
+      const dependencyScopedHandoff = request.messages.some((message) => message.content.includes("Create dependency handoff report"));
       return {
         passed: true,
         score: 100,
         issues: [],
         suggestions: [],
-        verifiedCriteria: harnessStatusAction
+        verifiedCriteria: dependencyScopedHandoff
+          ? [
+              "handoff-report.txt exists",
+              "handoff-report.txt contains DEPENDENCY_HANDOFF_OK"
+            ]
+          : harnessStatusAction
           ? [
               "Git status context is captured",
               "The harness verification command succeeds"

@@ -232,6 +232,8 @@ Each run writes an inspectable artifact set:
   step instead of only dumping raw content.
 - `task-context-*.json`: structured task-scoped retrieval evidence captured
   for model-executed tasks that request deterministic search or symbol context.
+- `task-dependencies-*.json`: dependency-scoped handoff payloads retained for
+  downstream model tasks, including only declared upstream outputs and receipts.
 - `task-tool-turns-*.json`: bounded model-tool loop history for tasks that
   requested additional harness evidence before producing a final result.
 - `task-observation-*.json`: structured read-only evidence captured by
@@ -276,6 +278,9 @@ Plan task contract:
 - model-executed tasks can request additional read/search/diff evidence during
   execution, and the harness records the resulting tool turns and tool-call
   counts in receipts and retained metrics
+- dependent model tasks now receive only their declared upstream outputs and
+  execution receipts, instead of the full prior-output history from unrelated
+  tasks
 - planners can set `executor = "harness"` for read-only verifier work so the
   harness can execute deterministic verification tasks without a model call
 - harness-executed verifier tasks must declare a typed `harnessAction`, and the

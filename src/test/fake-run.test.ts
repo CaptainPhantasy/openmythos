@@ -295,3 +295,30 @@ test("Runner supports planner-declared verification.command requests inside a mo
     && observation.nextActions.length === 0
   ));
 });
+
+test("Runner passes only declared dependency handoff context to downstream model tasks", async () => {
+  const workdir = await mkdtemp(join(tmpdir(), "openmythos-fake-dependency-handoff-"));
+  const config = await loadConfigWithOptionalProfile(resolve("openmythos.config.json"), "fake");
+  config.verification.localCommands = [];
+  const runner = new Runner(config, new StateStore(resolve(workdir, "runs")), workdir);
+
+  const result = await runner.run("dependency scoped handoff");
+  const execution = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "execution.json"), "utf8")) as Array<{
+    taskId: string;
+    status: string;
+    artifacts: string[];
+  }>;
+  const report = await readFile(resolve(workdir, "handoff-report.txt"), "utf8");
+
+  assert.equal(result.status, "completed");
+  assert.equal(report, "DEPENDENCY_HANDOFF_OK\n");
+  assert.deepEqual(
+    execution.map((receipt) => [receipt.taskId, receipt.status]),
+    [
+      ["task-1", "success"],
+      ["task-2", "success"],
+      ["task-3", "success"]
+    ]
+  );
+  assert.ok(execution[2]?.artifacts.some((artifact) => artifact.endsWith("task-dependencies-task-3.json")));
+});

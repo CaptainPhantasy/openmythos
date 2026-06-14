@@ -312,8 +312,19 @@ export class PhaseExecutor {
       return this.executeHarnessTask(task);
     }
 
-    const taskContextObservations = await this.collectModelTaskContext(task);
+    const dependencyContext = this.buildDependencyContext(task, plan, priorOutputs, this.taskReceipts);
     const taskContextArtifacts: string[] = [];
+    if (dependencyContext.outputs.length > 0 || dependencyContext.receipts.length > 0) {
+      const artifactPath = resolve(this.runDir, `task-dependencies-${task.id}.json`);
+      await writeFile(
+        artifactPath,
+        JSON.stringify({ taskId: task.id, dependencies: dependencyContext }, null, 2),
+        "utf-8"
+      );
+      taskContextArtifacts.push(artifactPath);
+    }
+
+    const taskContextObservations = await this.collectModelTaskContext(task);
     if (taskContextObservations.length > 0) {
       const artifactPath = resolve(this.runDir, `task-context-${task.id}.json`);
       await writeFile(
@@ -324,7 +335,7 @@ export class PhaseExecutor {
       taskContextArtifacts.push(artifactPath);
     }
 
-    const loopResult = await this.executeModelTaskLoop(task, plan, snippets, priorOutputs, taskContextObservations);
+    const loopResult = await this.executeModelTaskLoop(task, plan, snippets, dependencyContext, taskContextObservations);
     if (loopResult.artifactPath) {
       taskContextArtifacts.push(loopResult.artifactPath);
     }
@@ -576,7 +587,7 @@ export class PhaseExecutor {
     task: PlanTask,
     plan: Plan,
     snippets: string,
-    priorOutputs: TaskOutput[],
+    dependencyContext: { dependencyIds: string[]; outputs: TaskOutput[]; receipts: TaskExecutionReceipt[] },
     taskContextObservations: TaskObservation[]
   ): Promise<{
     output: TaskOutput;
@@ -590,7 +601,7 @@ export class PhaseExecutor {
     const currentFileState = await this.readCurrentFileState(task);
     const messages: AdapterMessage[] = [{
       role: "user",
-      content: `Task:\n${JSON.stringify(task, null, 2)}\n\nSuccess criteria:\n${plan.successCriteria.map((criterion) => `- ${criterion}`).join("\n")}\n\nRelevant snippets:\n${snippets}\n\nTask tool context:\n${JSON.stringify(taskContextObservations, null, 2)}\n\nCurrent file state:\n${JSON.stringify(currentFileState, null, 2)}\n\nPrior outputs:\n${JSON.stringify(priorOutputs, null, 2)}`
+      content: `Task:\n${JSON.stringify(task, null, 2)}\n\nSuccess criteria:\n${plan.successCriteria.map((criterion) => `- ${criterion}`).join("\n")}\n\nRelevant snippets:\n${snippets}\n\nDeclared dependency ids:\n${JSON.stringify(dependencyContext.dependencyIds, null, 2)}\n\nDependency outputs:\n${JSON.stringify(dependencyContext.outputs, null, 2)}\n\nDependency execution receipts:\n${JSON.stringify(dependencyContext.receipts, null, 2)}\n\nTask tool context:\n${JSON.stringify(taskContextObservations, null, 2)}\n\nCurrent file state:\n${JSON.stringify(currentFileState, null, 2)}`
     }];
     const toolObservations: TaskObservation[] = [];
     const toolTurns: Array<{ turn: number; toolRequests: TaskToolRequest[]; observations: TaskObservation[] }> = [];
@@ -678,6 +689,27 @@ export class PhaseExecutor {
       }
     }
     return currentFileState;
+  }
+
+  private buildDependencyContext(
+    task: PlanTask,
+    plan: Plan,
+    outputs: TaskOutput[],
+    receipts: TaskExecutionReceipt[]
+  ): { dependencyIds: string[]; outputs: TaskOutput[]; receipts: TaskExecutionReceipt[] } {
+    const dependencyIds = [...new Set(plan.dependencies[task.id] ?? [])];
+    const outputsById = new Map(outputs.map((output) => [output.taskId, output]));
+    const receiptsById = new Map(receipts.map((receipt) => [receipt.taskId, receipt]));
+
+    return {
+      dependencyIds,
+      outputs: dependencyIds
+        .map((dependencyId) => outputsById.get(dependencyId))
+        .filter((output): output is TaskOutput => Boolean(output)),
+      receipts: dependencyIds
+        .map((dependencyId) => receiptsById.get(dependencyId))
+        .filter((receipt): receipt is TaskExecutionReceipt => Boolean(receipt))
+    };
   }
 
   private async executeModelToolRequests(task: PlanTask, requests: TaskToolRequest[]): Promise<TaskObservation[]> {
