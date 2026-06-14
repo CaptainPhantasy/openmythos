@@ -41,6 +41,14 @@ fileEdits and errors must be JSON arrays.
 Only include fileEdits when you are providing complete corrected file content or a valid unified diff patch for an existing file.
 Focus on correctness, safety, schema compliance, and testability.`;
 
+export const TASK_VERIFIER_SYSTEM = `You verify one planned task during execution.
+Return valid JSON only. Do not include markdown.
+Use these keys exactly: taskId, status, fileEdits, summary, errors.
+status must be exactly one of: success, partial, failed.
+fileEdits and errors must be JSON arrays.
+Verifier tasks should normally return fileEdits=[] unless the task explicitly requires a verifier-authored patch.
+Base your summary and errors on concrete repository evidence, local command output, and provided file contents.`;
+
 export const VERIFIER_SYSTEM = `You are the final QA gate.
 Return valid JSON only. Do not include markdown.
 Use these keys exactly: passed, score, issues, suggestions, verifiedCriteria, failedCriteria.

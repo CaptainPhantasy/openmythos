@@ -11,6 +11,7 @@ import {
   CRITIC_SYSTEM,
   INTAKE_SYSTEM,
   PLANNER_SYSTEM,
+  TASK_VERIFIER_SYSTEM,
   VERIFIER_SYSTEM
 } from "../prompts/contracts.js";
 import { applyFileEdits } from "../tools/files.js";
@@ -140,7 +141,7 @@ export class PhaseExecutor {
 
       for (const item of batchOutputs) {
         await applyFileEdits(this.workdir, item.output.fileEdits, this.runDir);
-        this.taskReceipts.push(await this.buildTaskReceipt(item.task, item.output, item.review));
+        this.taskReceipts.push(await this.buildTaskReceipt(item.task, item.output, item.review, item.task.role));
         outputs.push(item.output);
       }
     }
@@ -280,16 +281,28 @@ export class PhaseExecutor {
     snippets: string,
     priorOutputs: TaskOutput[]
   ): Promise<TaskOutput> {
-    const role = task.role === "critic" ? "critic" : "coder";
+    const role = task.role;
+    const currentFileState: Record<string, string> = {};
+    for (const file of task.fileTargets) {
+      try {
+        currentFileState[file] = await readRelativeFile(this.workdir, file);
+      } catch (error) {
+        currentFileState[file] = `[read failed: ${(error as Error).message}]`;
+      }
+    }
     const model = this.config.models[role];
     return await this.callJson(role, `execute-${task.id}`, {
-      system: role === "critic" ? CRITIC_SYSTEM : CODER_SYSTEM,
+      system: role === "critic"
+        ? CRITIC_SYSTEM
+        : role === "verifier"
+          ? TASK_VERIFIER_SYSTEM
+          : CODER_SYSTEM,
       maxTokens: model.maxTokens,
       temperature: model.temperature,
       json: true,
       messages: [{
         role: "user",
-        content: `Task:\n${JSON.stringify(task, null, 2)}\n\nSuccess criteria:\n${plan.successCriteria.map((criterion) => `- ${criterion}`).join("\n")}\n\nRelevant snippets:\n${snippets}\n\nPrior outputs:\n${JSON.stringify(priorOutputs, null, 2)}`
+        content: `Task:\n${JSON.stringify(task, null, 2)}\n\nSuccess criteria:\n${plan.successCriteria.map((criterion) => `- ${criterion}`).join("\n")}\n\nRelevant snippets:\n${snippets}\n\nCurrent file state:\n${JSON.stringify(currentFileState, null, 2)}\n\nPrior outputs:\n${JSON.stringify(priorOutputs, null, 2)}`
       }]
     }, taskOutputSchema) as TaskOutput;
   }
@@ -297,7 +310,8 @@ export class PhaseExecutor {
   private async buildTaskReceipt(
     task: PlanTask,
     output: TaskOutput,
-    review: ReviewBundle
+    review: ReviewBundle,
+    executorRole: Extract<PlanTask["role"], "coder" | "critic" | "verifier">
   ): Promise<TaskExecutionReceipt> {
     const verificationResults: CommandReceipt[] = [];
     for (const command of task.verificationCommands) {
@@ -315,6 +329,7 @@ export class PhaseExecutor {
     if (failingResults.length > 0) {
       return {
         taskId: task.id,
+        executorRole,
         status: "error",
         summary: `Applied edits for ${task.id}, but ${failingResults.length} task verification command(s) failed.`,
         requiredTools: task.requiredTools,
@@ -328,6 +343,7 @@ export class PhaseExecutor {
     if (task.verificationCommands.length === 0) {
       return {
         taskId: task.id,
+        executorRole,
         status: "warning",
         summary: `Applied edits for ${task.id}, but no task-level verification commands were provided.`,
         requiredTools: task.requiredTools,
@@ -340,6 +356,7 @@ export class PhaseExecutor {
 
     return {
       taskId: task.id,
+      executorRole,
       status: "success",
       summary: `Applied edits for ${task.id} and passed all task-level verification commands.`,
       requiredTools: task.requiredTools,

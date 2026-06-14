@@ -40,27 +40,59 @@ export class FakeAdapter implements ModelAdapter {
     if (request.system.includes("create deterministic execution plans")) {
       const failingVerification = request.messages.some((message) => message.content.includes("failing task verification"));
       const aliasTools = request.messages.some((message) => message.content.includes("alias tool normalization"));
+      const verifierRouting = request.messages.some((message) => message.content.includes("verifier task routing"));
       return {
         goal: "deterministic fake run",
-        tasks: [
-          {
-            id: "task-1",
-            title: "Create fake output marker",
-            description: "Create a file proving the runner applied a model-provided edit.",
-            role: "coder",
-            fileTargets: ["openmythos-fake-output.txt"],
-            requiredTools: aliasTools ? ["write", "bash"] : ["filesystem.write"],
-            verificationCommands: failingVerification
-              ? ["test -f openmythos-fake-output.txt", "test -f definitely-missing-task-verification.txt"]
-              : ["test -f openmythos-fake-output.txt", "grep -qx 'OPENMYTHOS_FAKE_SUCCESS' openmythos-fake-output.txt"],
-            executionMode: "serial",
-            acceptanceCriteria: [
-              "The file exists",
-              "The file contains OPENMYTHOS_FAKE_SUCCESS"
+        tasks: verifierRouting
+          ? [
+              {
+                id: "task-1",
+                title: "Create fake output marker",
+                description: "Create a file proving the runner applied a model-provided edit.",
+                role: "coder",
+                fileTargets: ["openmythos-fake-output.txt"],
+                requiredTools: ["filesystem.write"],
+                verificationCommands: ["test -f openmythos-fake-output.txt"],
+                executionMode: "serial",
+                acceptanceCriteria: [
+                  "The file exists",
+                  "The file contains OPENMYTHOS_FAKE_SUCCESS"
+                ]
+              },
+              {
+                id: "task-2",
+                title: "Verify fake output marker",
+                description: "Verify the marker file with the verifier worker.",
+                role: "verifier",
+                fileTargets: ["openmythos-fake-output.txt"],
+                requiredTools: ["filesystem.read", "verification.command"],
+                verificationCommands: ["grep -qx 'OPENMYTHOS_FAKE_SUCCESS' openmythos-fake-output.txt"],
+                executionMode: "serial",
+                acceptanceCriteria: [
+                  "The file exists",
+                  "The file contains OPENMYTHOS_FAKE_SUCCESS"
+                ]
+              }
             ]
-          }
-        ],
-        dependencies: {},
+          : [
+              {
+                id: "task-1",
+                title: "Create fake output marker",
+                description: "Create a file proving the runner applied a model-provided edit.",
+                role: "coder",
+                fileTargets: ["openmythos-fake-output.txt"],
+                requiredTools: aliasTools ? ["write", "bash"] : ["filesystem.write"],
+                verificationCommands: failingVerification
+                  ? ["test -f openmythos-fake-output.txt", "test -f definitely-missing-task-verification.txt"]
+                  : ["test -f openmythos-fake-output.txt", "grep -qx 'OPENMYTHOS_FAKE_SUCCESS' openmythos-fake-output.txt"],
+                executionMode: "serial",
+                acceptanceCriteria: [
+                  "The file exists",
+                  "The file contains OPENMYTHOS_FAKE_SUCCESS"
+                ]
+              }
+            ],
+        dependencies: verifierRouting ? { "task-2": ["task-1"] } : {},
         successCriteria: [
           "openmythos-fake-output.txt exists",
           "openmythos-fake-output.txt contains OPENMYTHOS_FAKE_SUCCESS"
@@ -68,19 +100,37 @@ export class FakeAdapter implements ModelAdapter {
       };
     }
 
-    if (request.system.includes("implement one planned task") || request.system.includes("review and correct one planned task")) {
+    if (request.system.includes("verify one planned task during execution")) {
+      const taskId = request.messages.some((message) => message.content.includes('"id": "task-2"')) ? "task-2" : "task-1";
       return {
-        taskId: "task-1",
+        taskId,
         status: "success",
-        fileEdits: [
-          {
-            path: "openmythos-fake-output.txt",
-            action: "create",
-            content: "OPENMYTHOS_FAKE_SUCCESS\n",
-            description: "Create deterministic success marker"
-          }
-        ],
-        summary: "Created deterministic fake output marker.",
+        fileEdits: [],
+        summary: taskId === "task-2"
+          ? "Verified deterministic fake output marker."
+          : "Verifier confirmed the planned task state.",
+        errors: []
+      };
+    }
+
+    if (request.system.includes("implement one planned task") || request.system.includes("review and correct one planned task")) {
+      const taskId = request.messages.some((message) => message.content.includes('"id": "task-2"')) ? "task-2" : "task-1";
+      return {
+        taskId,
+        status: "success",
+        fileEdits: taskId === "task-2"
+          ? []
+          : [
+              {
+                path: "openmythos-fake-output.txt",
+                action: "create",
+                content: "OPENMYTHOS_FAKE_SUCCESS\n",
+                description: "Create deterministic success marker"
+              }
+            ],
+        summary: taskId === "task-2"
+          ? "Reviewed deterministic fake output marker."
+          : "Created deterministic fake output marker.",
         errors: []
       };
     }

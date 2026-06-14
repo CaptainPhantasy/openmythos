@@ -86,6 +86,28 @@ test("Runner normalizes planner-selected tool aliases before execution", async (
   assert.deepEqual(execution[0]?.requiredTools, ["filesystem.write", "shell.run"]);
 });
 
+test("Runner routes verifier tasks through the verifier execution lane", async () => {
+  const workdir = await mkdtemp(join(tmpdir(), "openmythos-fake-verifier-route-"));
+  const config = await loadConfigWithOptionalProfile(resolve("openmythos.config.json"), "fake");
+  const runner = new Runner(config, new StateStore(resolve(workdir, "runs")), workdir);
+
+  const result = await runner.run("verifier task routing");
+  const execution = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "execution.json"), "utf8")) as Array<{
+    taskId: string;
+    executorRole: string;
+    status: string;
+  }>;
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(
+    execution.map((receipt) => [receipt.taskId, receipt.executorRole, receipt.status]),
+    [
+      ["task-1", "coder", "success"],
+      ["task-2", "verifier", "success"]
+    ]
+  );
+});
+
 test("Runner can stop in awaiting_approval before applying risky edits", async () => {
   const workdir = await mkdtemp(join(tmpdir(), "openmythos-fake-approval-"));
   const config = await loadConfigWithOptionalProfile(resolve("openmythos.config.json"), "fake");

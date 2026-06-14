@@ -48,6 +48,7 @@ export interface CommandReceipt {
 
 export interface TaskExecutionReceipt {
   taskId: string;
+  executorRole: Extract<ModelRole, "coder" | "critic" | "verifier">;
   status: "success" | "warning" | "error";
   summary: string;
   requiredTools: string[];

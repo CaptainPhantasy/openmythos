@@ -248,6 +248,8 @@ Plan task contract:
 - planners can specify `verificationCommands` for task-level local evidence
 - `requiredTools` are normalized against a deterministic harness catalog and
   repaired or rejected when they reference unsupported or role-mismatched tools
+- task roles are now routed through matching worker lanes, including
+  task-level `verifier` execution before the final QA gate
 - the harness can batch dependency-free tasks when they are marked
   `executionMode = "parallel"` and do not target the same files
 
