@@ -91,6 +91,16 @@ const taskStatusSchema = z.preprocess((value) => {
   return value;
 }, z.enum(["success", "partial", "failed"]));
 
+const taskStepStatusSchema = z.preprocess((value) => {
+  if (value === "completed" || value === "complete" || value === "done") {
+    return "success";
+  }
+  if (value === "tools" || value === "tool_request") {
+    return "tool";
+  }
+  return value;
+}, z.enum(["tool", "success", "partial", "failed"]));
+
 export const intakeSchema = z.object({
   taskType: z.string().min(1),
   description: z.string().min(1),
@@ -149,12 +159,52 @@ export const fileEditSchema = z.object({
   }
 });
 
+export const taskToolRequestSchema = z.object({
+  tool: z.enum(["filesystem.read", "filesystem.search", "code.symbols", "git.status", "git.diff"]),
+  input: z.object({
+    query: z.string().optional(),
+    paths: stringListSchema.optional()
+  }).default({})
+});
+
 export const taskOutputSchema = z.object({
   taskId: z.string().min(1),
   status: taskStatusSchema,
   fileEdits: z.array(fileEditSchema).default([]),
   summary: z.string(),
   errors: stringListSchema.default([])
+});
+
+export const taskStepSchema = z.object({
+  taskId: z.string().min(1),
+  status: taskStepStatusSchema,
+  fileEdits: z.array(fileEditSchema).default([]),
+  summary: z.string(),
+  errors: stringListSchema.default([]),
+  toolRequests: z.array(taskToolRequestSchema).default([])
+}).superRefine((step, ctx) => {
+  if (step.status === "tool") {
+    if (step.toolRequests.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Tool step responses must include at least one tool request."
+      });
+    }
+    if (step.fileEdits.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Tool step responses cannot include file edits."
+      });
+    }
+    return;
+  }
+
+  if (step.toolRequests.length > 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Final task responses must not include tool requests."
+    });
+  }
 });
 
 export const qaIssueSchema = z.object({

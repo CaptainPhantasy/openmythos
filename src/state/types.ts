@@ -48,6 +48,8 @@ export interface RunMetrics {
   taskCount: number;
   modelTaskCount: number;
   harnessTaskCount: number;
+  modelToolTurnCount: number;
+  modelToolCallCount: number;
   fileEditCount: number;
   patchEditCount: number;
   deleteEditCount: number;

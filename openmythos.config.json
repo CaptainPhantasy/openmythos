@@ -78,6 +78,7 @@
   },
   "execution": {
     "maxRetries": 3,
+    "maxTaskToolTurns": 3,
     "timeoutMs": 120000,
     "workingDirectory": "."
   },

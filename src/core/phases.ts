@@ -20,7 +20,7 @@ import { executeShell, type ShellResult } from "../tools/shell.js";
 import { findSymbolDefinitions, searchRepository } from "../tools/retrieval.js";
 import { parseJsonFromModel } from "./json.js";
 import { ApprovalRequiredError, createReviewBundle } from "./review.js";
-import { contextSchema, intakeSchema, planSchema, qaSchema, taskOutputSchema } from "./schemas.js";
+import { contextSchema, intakeSchema, planSchema, qaSchema, taskOutputSchema, taskStepSchema } from "./schemas.js";
 import {
   formatHarnessActionCatalogForPrompt,
   formatToolCatalogForPrompt,
@@ -28,7 +28,7 @@ import {
   summarizeToolValidationIssues
 } from "./tooling.js";
 import { buildExecutionBatches } from "./toposort.js";
-import type { AdapterRequest, CommandReceipt, ContextResult, IntakeResult, Plan, PlanTask, QaResult, ReviewBundle, TaskExecutionReceipt, TaskObservation, TaskOutput } from "./types.js";
+import type { AdapterMessage, AdapterRequest, CommandReceipt, ContextResult, IntakeResult, Plan, PlanTask, QaResult, ReviewBundle, TaskExecutionReceipt, TaskObservation, TaskOutput, TaskStepResult, TaskToolRequest } from "./types.js";
 import type { ModelUsageMetric } from "../state/types.js";
 
 export class PhaseExecutor {
@@ -154,6 +154,8 @@ export class PhaseExecutor {
           item.review,
           item.execution.executorKind,
           item.execution.executorRole,
+          item.execution.toolTurnCount,
+          item.execution.toolCallCount,
           item.execution.observations,
           item.execution.artifacts,
           item.execution.verificationResults
@@ -300,6 +302,8 @@ export class PhaseExecutor {
     output: TaskOutput;
     executorKind: PlanTask["executor"];
     executorRole: Extract<PlanTask["role"], "coder" | "critic" | "verifier">;
+    toolTurnCount: number;
+    toolCallCount: number;
     observations: TaskObservation[];
     artifacts: string[];
     verificationResults?: CommandReceipt[];
@@ -320,36 +324,18 @@ export class PhaseExecutor {
       taskContextArtifacts.push(artifactPath);
     }
 
-    const role = task.role;
-    const currentFileState: Record<string, string> = {};
-    for (const file of task.fileTargets) {
-      try {
-        currentFileState[file] = await readRelativeFile(this.workdir, file);
-      } catch (error) {
-        currentFileState[file] = `[read failed: ${(error as Error).message}]`;
-      }
+    const loopResult = await this.executeModelTaskLoop(task, plan, snippets, priorOutputs, taskContextObservations);
+    if (loopResult.artifactPath) {
+      taskContextArtifacts.push(loopResult.artifactPath);
     }
-    const model = this.config.models[role];
-    const output = await this.callJson(role, `execute-${task.id}`, {
-      system: role === "critic"
-        ? CRITIC_SYSTEM
-        : role === "verifier"
-          ? TASK_VERIFIER_SYSTEM
-          : CODER_SYSTEM,
-      maxTokens: model.maxTokens,
-      temperature: model.temperature,
-      json: true,
-      messages: [{
-        role: "user",
-        content: `Task:\n${JSON.stringify(task, null, 2)}\n\nSuccess criteria:\n${plan.successCriteria.map((criterion) => `- ${criterion}`).join("\n")}\n\nRelevant snippets:\n${snippets}\n\nTask tool context:\n${JSON.stringify(taskContextObservations, null, 2)}\n\nCurrent file state:\n${JSON.stringify(currentFileState, null, 2)}\n\nPrior outputs:\n${JSON.stringify(priorOutputs, null, 2)}`
-      }]
-    }, taskOutputSchema) as TaskOutput;
 
     return {
-      output,
+      output: loopResult.output,
       executorKind: "model",
-      executorRole: role,
-      observations: taskContextObservations,
+      executorRole: task.role,
+      toolTurnCount: loopResult.toolTurnCount,
+      toolCallCount: loopResult.toolCallCount,
+      observations: [...taskContextObservations, ...loopResult.toolObservations],
       artifacts: taskContextArtifacts
     };
   }
@@ -360,6 +346,8 @@ export class PhaseExecutor {
     output: TaskOutput;
     executorKind: "harness";
     executorRole: "verifier";
+    toolTurnCount: number;
+    toolCallCount: number;
     observations: TaskObservation[];
     artifacts: string[];
     verificationResults: CommandReceipt[];
@@ -386,6 +374,8 @@ export class PhaseExecutor {
       },
       executorKind: "harness",
       executorRole: "verifier",
+      toolTurnCount: 0,
+      toolCallCount: 0,
       observations,
       artifacts: [observationArtifactPath],
       verificationResults
@@ -398,6 +388,8 @@ export class PhaseExecutor {
     review: ReviewBundle,
     executorKind: PlanTask["executor"],
     executorRole: Extract<PlanTask["role"], "coder" | "critic" | "verifier">,
+    toolTurnCount: number,
+    toolCallCount: number,
     observations: TaskObservation[],
     extraArtifacts: string[],
     precomputedVerificationResults?: CommandReceipt[]
@@ -416,6 +408,8 @@ export class PhaseExecutor {
         executorKind,
         executorRole,
         harnessAction: task.harnessAction,
+        toolTurnCount,
+        toolCallCount,
         status: "error",
         summary: `${actionSummary}, but ${failingResults.length} task verification command(s) failed.`,
         requiredTools: task.requiredTools,
@@ -433,6 +427,8 @@ export class PhaseExecutor {
         executorKind,
         executorRole,
         harnessAction: task.harnessAction,
+        toolTurnCount,
+        toolCallCount,
         status: "warning",
         summary: `${actionSummary}, but no task-level verification commands were provided.`,
         requiredTools: task.requiredTools,
@@ -449,6 +445,8 @@ export class PhaseExecutor {
       executorKind,
       executorRole,
       harnessAction: task.harnessAction,
+      toolTurnCount,
+      toolCallCount,
       status: "success",
       summary: `${actionSummary} and passed all task-level verification commands.`,
       requiredTools: task.requiredTools,
@@ -548,14 +546,7 @@ export class PhaseExecutor {
     const queries = [...new Set(task.contextQueries.map((query) => query.trim()).filter((query) => query.length > 0))];
 
     if (task.requiredTools.includes("filesystem.search")) {
-      if (queries.length === 0) {
-        observations.push({
-          kind: "filesystem.search",
-          status: "warning",
-          summary: "No contextQueries were provided for filesystem.search.",
-          content: "Add one or more explicit task context queries to use repository text search."
-        });
-      } else {
+      if (queries.length > 0) {
         for (const query of queries) {
           observations.push(await searchRepository(this.workdir, query, this.config.execution.timeoutMs));
         }
@@ -563,14 +554,7 @@ export class PhaseExecutor {
     }
 
     if (task.requiredTools.includes("code.symbols")) {
-      if (queries.length === 0) {
-        observations.push({
-          kind: "code.symbols",
-          status: "warning",
-          summary: "No contextQueries were provided for code.symbols.",
-          content: "Add identifier-like task context queries to use symbol lookup."
-        });
-      } else {
+      if (queries.length > 0) {
         for (const query of queries) {
           observations.push(await findSymbolDefinitions(this.workdir, query, this.config.execution.timeoutMs));
         }
@@ -578,6 +562,197 @@ export class PhaseExecutor {
     }
 
     return observations;
+  }
+
+  private async executeModelTaskLoop(
+    task: PlanTask,
+    plan: Plan,
+    snippets: string,
+    priorOutputs: TaskOutput[],
+    taskContextObservations: TaskObservation[]
+  ): Promise<{
+    output: TaskOutput;
+    toolTurnCount: number;
+    toolCallCount: number;
+    toolObservations: TaskObservation[];
+    artifactPath: string | null;
+  }> {
+    const role = task.role;
+    const model = this.config.models[role];
+    const currentFileState = await this.readCurrentFileState(task);
+    const messages: AdapterMessage[] = [{
+      role: "user",
+      content: `Task:\n${JSON.stringify(task, null, 2)}\n\nSuccess criteria:\n${plan.successCriteria.map((criterion) => `- ${criterion}`).join("\n")}\n\nRelevant snippets:\n${snippets}\n\nTask tool context:\n${JSON.stringify(taskContextObservations, null, 2)}\n\nCurrent file state:\n${JSON.stringify(currentFileState, null, 2)}\n\nPrior outputs:\n${JSON.stringify(priorOutputs, null, 2)}`
+    }];
+    const toolObservations: TaskObservation[] = [];
+    const toolTurns: Array<{ turn: number; toolRequests: TaskToolRequest[]; observations: TaskObservation[] }> = [];
+
+    for (let turn = 0; turn <= this.config.execution.maxTaskToolTurns; turn += 1) {
+      const step = await this.callJson(role, `execute-${task.id}-turn-${turn}`, {
+        system: role === "critic"
+          ? CRITIC_SYSTEM
+          : role === "verifier"
+            ? TASK_VERIFIER_SYSTEM
+            : CODER_SYSTEM,
+        maxTokens: model.maxTokens,
+        temperature: model.temperature,
+        json: true,
+        messages
+      }, taskStepSchema) as TaskStepResult;
+
+      if (step.status !== "tool") {
+        return {
+          output: {
+            taskId: step.taskId,
+            status: step.status,
+            fileEdits: step.fileEdits,
+            summary: step.summary,
+            errors: step.errors
+          },
+          toolTurnCount: toolTurns.length,
+          toolCallCount: toolTurns.reduce((sum, item) => sum + item.toolRequests.length, 0),
+          toolObservations,
+          artifactPath: await this.writeTaskToolTurnsArtifact(task.id, toolTurns)
+        };
+      }
+
+      if (turn === this.config.execution.maxTaskToolTurns) {
+        return {
+          output: {
+            taskId: task.id,
+            status: "failed",
+            fileEdits: [],
+            summary: `Task ${task.id} exceeded the maximum model tool turns.`,
+            errors: [`The model requested more than ${this.config.execution.maxTaskToolTurns} tool turns.`]
+          },
+          toolTurnCount: toolTurns.length,
+          toolCallCount: toolTurns.reduce((sum, item) => sum + item.toolRequests.length, 0),
+          toolObservations,
+          artifactPath: await this.writeTaskToolTurnsArtifact(task.id, toolTurns)
+        };
+      }
+
+      const observations = await this.executeModelToolRequests(task, step.toolRequests);
+      toolTurns.push({ turn: turn + 1, toolRequests: step.toolRequests, observations });
+      toolObservations.push(...observations);
+      messages.push({
+        role: "assistant",
+        content: JSON.stringify(step)
+      });
+      messages.push({
+        role: "user",
+        content: `Tool results for the previous request:\n${JSON.stringify(observations, null, 2)}`
+      });
+    }
+
+    return {
+      output: {
+        taskId: task.id,
+        status: "failed",
+        fileEdits: [],
+        summary: `Task ${task.id} exited the model tool loop without a final result.`,
+        errors: ["The model did not produce a final task result."]
+      },
+      toolTurnCount: toolTurns.length,
+      toolCallCount: toolTurns.reduce((sum, item) => sum + item.toolRequests.length, 0),
+      toolObservations,
+      artifactPath: await this.writeTaskToolTurnsArtifact(task.id, toolTurns)
+    };
+  }
+
+  private async readCurrentFileState(task: PlanTask): Promise<Record<string, string>> {
+    const currentFileState: Record<string, string> = {};
+    for (const file of task.fileTargets) {
+      try {
+        currentFileState[file] = await readRelativeFile(this.workdir, file);
+      } catch (error) {
+        currentFileState[file] = `[read failed: ${(error as Error).message}]`;
+      }
+    }
+    return currentFileState;
+  }
+
+  private async executeModelToolRequests(task: PlanTask, requests: TaskToolRequest[]): Promise<TaskObservation[]> {
+    const observations: TaskObservation[] = [];
+    const limitedRequests = requests.slice(0, 3);
+    for (const request of limitedRequests) {
+      if (!task.requiredTools.includes(request.tool)) {
+        observations.push({
+          kind: request.tool,
+          status: "error",
+          summary: `Requested tool ${request.tool} is not allowed for ${task.id}.`,
+          content: `Allowed tools: ${task.requiredTools.join(", ")}`
+        });
+        continue;
+      }
+
+      switch (request.tool) {
+        case "filesystem.read": {
+          const paths = (request.input.paths ?? []).slice(0, 5);
+          if (paths.length === 0) {
+            observations.push({
+              kind: "filesystem.read",
+              status: "warning",
+              summary: "filesystem.read request omitted paths.",
+              content: "Provide one or more relative paths in input.paths."
+            });
+            break;
+          }
+          for (const path of paths) {
+            try {
+              const content = await readRelativeFile(this.workdir, path);
+              observations.push({
+                kind: "filesystem.read",
+                status: "success",
+                summary: `Read ${path}`,
+                content
+              });
+            } catch (error) {
+              observations.push({
+                kind: "filesystem.read",
+                status: "warning",
+                summary: `Could not read ${path}`,
+                content: `[read failed: ${(error as Error).message}]`
+              });
+            }
+          }
+          break;
+        }
+        case "filesystem.search":
+          observations.push(await searchRepository(this.workdir, request.input.query ?? "", this.config.execution.timeoutMs));
+          break;
+        case "code.symbols":
+          observations.push(await findSymbolDefinitions(this.workdir, request.input.query ?? "", this.config.execution.timeoutMs));
+          break;
+        case "git.status": {
+          const gitStatus = await this.collectGitStatusObservation();
+          if (gitStatus) {
+            observations.push(gitStatus);
+          }
+          break;
+        }
+        case "git.diff": {
+          const gitDiff = await this.collectGitDiffObservation();
+          if (gitDiff) {
+            observations.push(gitDiff);
+          }
+          break;
+        }
+      }
+    }
+    return observations;
+  }
+
+  private async writeTaskToolTurnsArtifact(
+    taskId: string,
+    toolTurns: Array<{ turn: number; toolRequests: TaskToolRequest[]; observations: TaskObservation[] }>
+  ): Promise<string | null> {
+    if (toolTurns.length === 0) {
+      return null;
+    }
+    const artifactPath = resolve(this.runDir, `task-tool-turns-${taskId}.json`);
+    await writeFile(artifactPath, JSON.stringify({ taskId, toolTurns }, null, 2), "utf-8");
+    return artifactPath;
   }
 
   private async collectGitStatusObservation(): Promise<TaskObservation | null> {

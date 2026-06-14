@@ -224,3 +224,39 @@ test("Runner retains task-scoped retrieval observations for model tasks", async 
   assert.ok(execution[0]?.observations.some((observation) => observation.kind === "code.symbols" && /locateTarget/.test(observation.content)));
   assert.ok(execution[0]?.artifacts.some((artifact) => artifact.endsWith("task-context-task-1.json")));
 });
+
+test("Runner supports bounded tool-use turns inside a model task", async () => {
+  const workdir = await mkdtemp(join(tmpdir(), "openmythos-fake-tool-loop-"));
+  await mkdir(resolve(workdir, "src"), { recursive: true });
+  await writeFile(
+    resolve(workdir, "src", "example.ts"),
+    'export function locateTarget(): string {\n  return "OPENMYTHOS_FAKE_SUCCESS";\n}\n',
+    "utf8"
+  );
+
+  const config = await loadConfigWithOptionalProfile(resolve("openmythos.config.json"), "fake");
+  const runner = new Runner(config, new StateStore(resolve(workdir, "runs")), workdir);
+
+  const result = await runner.run("model tool loop");
+  const execution = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "execution.json"), "utf8")) as Array<{
+    taskId: string;
+    toolTurnCount: number;
+    toolCallCount: number;
+    observations: Array<{ kind: string; status: string; content: string }>;
+    artifacts: string[];
+  }>;
+  const metrics = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "metrics.json"), "utf8")) as {
+    modelToolTurnCount: number;
+    modelToolCallCount: number;
+  };
+
+  assert.equal(result.status, "completed");
+  assert.equal(execution[0]?.taskId, "task-1");
+  assert.equal(execution[0]?.toolTurnCount, 1);
+  assert.equal(execution[0]?.toolCallCount, 2);
+  assert.ok(execution[0]?.observations.some((observation) => observation.kind === "filesystem.search"));
+  assert.ok(execution[0]?.observations.some((observation) => observation.kind === "filesystem.read" && /locateTarget/.test(observation.content)));
+  assert.ok(execution[0]?.artifacts.some((artifact) => artifact.endsWith("task-tool-turns-task-1.json")));
+  assert.equal(metrics.modelToolTurnCount, 1);
+  assert.equal(metrics.modelToolCallCount, 2);
+});

@@ -39,6 +39,8 @@ export function buildRunMetrics(input: {
     taskCount: input.plan?.tasks.length ?? 0,
     modelTaskCount: input.taskReceipts.filter((receipt) => receipt.executorKind === "model").length,
     harnessTaskCount: input.taskReceipts.filter((receipt) => receipt.executorKind === "harness").length,
+    modelToolTurnCount: input.taskReceipts.reduce((sum, receipt) => sum + (receipt.executorKind === "model" ? receipt.toolTurnCount : 0), 0),
+    modelToolCallCount: input.taskReceipts.reduce((sum, receipt) => sum + (receipt.executorKind === "model" ? receipt.toolCallCount : 0), 0),
     fileEditCount: outputs.reduce((sum, output) => sum + output.fileEdits.length, 0),
     patchEditCount: outputs.reduce((sum, output) => sum + output.fileEdits.filter((edit) => edit.action === "patch").length, 0),
     deleteEditCount: outputs.reduce((sum, output) => sum + output.fileEdits.filter((edit) => edit.action === "delete").length, 0),
@@ -68,6 +70,8 @@ export interface BenchmarkSummary {
   totalPatchEdits: number;
   totalModelTaskCount: number;
   totalHarnessTaskCount: number;
+  totalModelToolTurnCount: number;
+  totalModelToolCallCount: number;
   totalTaskVerificationCount: number;
   totalTaskVerificationFailures: number;
 }
@@ -102,6 +106,8 @@ export function summarizeBench(metrics: RunMetrics[]): BenchmarkSummary {
     totalPatchEdits: metrics.reduce((sum, metric) => sum + metric.patchEditCount, 0),
     totalModelTaskCount: metrics.reduce((sum, metric) => sum + metric.modelTaskCount, 0),
     totalHarnessTaskCount: metrics.reduce((sum, metric) => sum + metric.harnessTaskCount, 0),
+    totalModelToolTurnCount: metrics.reduce((sum, metric) => sum + metric.modelToolTurnCount, 0),
+    totalModelToolCallCount: metrics.reduce((sum, metric) => sum + metric.modelToolCallCount, 0),
     totalTaskVerificationCount: metrics.reduce((sum, metric) => sum + metric.taskVerificationCount, 0),
     totalTaskVerificationFailures: metrics.reduce((sum, metric) => sum + metric.taskVerificationFailureCount, 0)
   };

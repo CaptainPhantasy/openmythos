@@ -57,6 +57,14 @@ export interface CommandReceipt {
   durationMs: number;
 }
 
+export interface TaskToolRequest {
+  tool: "filesystem.read" | "filesystem.search" | "code.symbols" | "git.status" | "git.diff";
+  input: {
+    query?: string;
+    paths?: string[];
+  };
+}
+
 export interface TaskObservation {
   kind: string;
   status: "success" | "warning" | "error";
@@ -69,6 +77,8 @@ export interface TaskExecutionReceipt {
   executorKind: PlanTask["executor"];
   executorRole: Extract<ModelRole, "coder" | "critic" | "verifier">;
   harnessAction: PlanTask["harnessAction"];
+  toolTurnCount: number;
+  toolCallCount: number;
   status: "success" | "warning" | "error";
   summary: string;
   requiredTools: string[];
@@ -114,6 +124,15 @@ export interface TaskOutput {
   fileEdits: FileEdit[];
   summary: string;
   errors: string[];
+}
+
+export interface TaskStepResult {
+  taskId: string;
+  status: "tool" | TaskOutput["status"];
+  fileEdits: FileEdit[];
+  summary: string;
+  errors: string[];
+  toolRequests: TaskToolRequest[];
 }
 
 export interface QaIssue {

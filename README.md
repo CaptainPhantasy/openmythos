@@ -227,6 +227,8 @@ Each run writes an inspectable artifact set:
   task-level verification commands, command results, and next actions.
 - `task-context-*.json`: structured task-scoped retrieval evidence captured
   for model-executed tasks that request deterministic search or symbol context.
+- `task-tool-turns-*.json`: bounded model-tool loop history for tasks that
+  requested additional harness evidence before producing a final result.
 - `task-observation-*.json`: structured read-only evidence captured by
   harness-executed verifier tasks.
 - `qa.json`: local and model verification result.
@@ -239,7 +241,7 @@ Each run writes an inspectable artifact set:
 - `governance.json`: repository preflight result, including dirty-tree and
   branch-policy findings.
 - `metrics.json`: retained run metrics, including model calls, token totals,
-  durations, edit counts, and verification counts.
+  durations, edit counts, verification counts, and model tool-loop counts.
 - `final.md`: final execution report.
 - `*-invalid-attempt-*.txt`: raw invalid model responses saved during bounded
   JSON repair.
@@ -256,11 +258,16 @@ Plan task contract:
 - planners can specify `contextQueries` to request deterministic task-scoped
   retrieval during execution
 - planners can specify `verificationCommands` for task-level local evidence
+- model-executed tasks can request bounded read-only tool turns, and the
+  harness enforces `execution.maxTaskToolTurns` as a hard stop condition
 - `requiredTools` are normalized against a deterministic harness catalog and
   repaired or rejected when they reference unsupported or role-mismatched tools
 - model-executed tasks can now request deterministic repository search and
   symbol lookup, and the harness retains the resulting task context as
   structured observations and artifacts
+- model-executed tasks can request additional read/search/diff evidence during
+  execution, and the harness records the resulting tool turns and tool-call
+  counts in receipts and retained metrics
 - planners can set `executor = "harness"` for read-only verifier work so the
   harness can execute deterministic verification tasks without a model call
 - harness-executed verifier tasks must declare a typed `harnessAction`, and the

@@ -17,7 +17,7 @@ export function buildCli(): Command {
   program
     .name("openmythos")
     .description("Deterministic multi-model orchestration harness")
-    .version("0.13.0");
+    .version("0.14.0");
 
   program.command("run")
     .argument("<goal>", "Goal to execute")

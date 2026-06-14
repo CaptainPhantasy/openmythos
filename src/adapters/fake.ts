@@ -44,6 +44,7 @@ export class FakeAdapter implements ModelAdapter {
       const harnessExecutor = request.messages.some((message) => message.content.includes("harness task execution"));
       const harnessStatusAction = request.messages.some((message) => message.content.includes("harness git status action"));
       const taskScopedRetrieval = request.messages.some((message) => message.content.includes("task scoped retrieval"));
+      const modelToolLoop = request.messages.some((message) => message.content.includes("model tool loop"));
       const successCriteria = harnessStatusAction
         ? [
             "Git status context is captured",
@@ -72,6 +73,26 @@ export class FakeAdapter implements ModelAdapter {
                 acceptanceCriteria: [
                   "Git status context is captured",
                   "The verification command succeeds"
+                ]
+              }
+            ]
+          : modelToolLoop
+          ? [
+              {
+                id: "task-1",
+                title: "Create fake output marker through model tool loop",
+                description: "Request read-only harness tools before producing the final file edit.",
+                role: "coder",
+                executor: "model",
+                harnessAction: null,
+                contextQueries: [],
+                fileTargets: ["openmythos-fake-output.txt"],
+                requiredTools: ["filesystem.search", "filesystem.read", "filesystem.write"],
+                verificationCommands: ["test -f openmythos-fake-output.txt", "grep -qx 'OPENMYTHOS_FAKE_SUCCESS' openmythos-fake-output.txt"],
+                executionMode: "serial",
+                acceptanceCriteria: [
+                  "The file exists",
+                  "The file contains OPENMYTHOS_FAKE_SUCCESS"
                 ]
               }
             ]
@@ -169,12 +190,34 @@ export class FakeAdapter implements ModelAdapter {
         summary: taskId === "task-2"
           ? "Verified deterministic fake output marker."
           : "Verifier confirmed the planned task state.",
-        errors: []
+        errors: [],
+        toolRequests: []
       };
     }
 
     if (request.system.includes("implement one planned task") || request.system.includes("review and correct one planned task")) {
+      const modelToolLoop = request.messages.some((message) => message.content.includes("Create fake output marker through model tool loop"));
+      const hasToolResults = request.messages.some((message) => message.content.includes("Tool results for the previous request:"));
       const taskId = request.messages.some((message) => message.content.includes('"id": "task-2"')) ? "task-2" : "task-1";
+      if (modelToolLoop && !hasToolResults) {
+        return {
+          taskId,
+          status: "tool",
+          fileEdits: [],
+          summary: "Need repository search and file read evidence before writing the marker file.",
+          errors: [],
+          toolRequests: [
+            {
+              tool: "filesystem.search",
+              input: { query: "OPENMYTHOS_FAKE_SUCCESS" }
+            },
+            {
+              tool: "filesystem.read",
+              input: { paths: ["src/example.ts"] }
+            }
+          ]
+        };
+      }
       return {
         taskId,
         status: "success",
@@ -191,7 +234,8 @@ export class FakeAdapter implements ModelAdapter {
         summary: taskId === "task-2"
           ? "Reviewed deterministic fake output marker."
           : "Created deterministic fake output marker.",
-        errors: []
+        errors: [],
+        toolRequests: []
       };
     }
 

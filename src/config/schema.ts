@@ -95,6 +95,7 @@ export const openMythosConfigSchema = z.object({
   }),
   execution: z.object({
     maxRetries: z.number().int().min(0).default(3),
+    maxTaskToolTurns: z.number().int().min(0).default(3),
     timeoutMs: z.number().int().positive().default(120000),
     workingDirectory: z.string().default(".")
   }).default({}),

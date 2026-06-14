@@ -21,6 +21,8 @@ test("summarizeBench aggregates retained run metrics", () => {
       taskCount: 2,
       modelTaskCount: 2,
       harnessTaskCount: 0,
+      modelToolTurnCount: 1,
+      modelToolCallCount: 2,
       fileEditCount: 4,
       patchEditCount: 1,
       deleteEditCount: 0,
@@ -49,6 +51,8 @@ test("summarizeBench aggregates retained run metrics", () => {
       taskCount: 3,
       modelTaskCount: 2,
       harnessTaskCount: 1,
+      modelToolTurnCount: 2,
+      modelToolCallCount: 3,
       fileEditCount: 2,
       patchEditCount: 0,
       deleteEditCount: 1,
@@ -76,6 +80,8 @@ test("summarizeBench aggregates retained run metrics", () => {
   assert.equal(summary.totalPatchEdits, 1);
   assert.equal(summary.totalModelTaskCount, 4);
   assert.equal(summary.totalHarnessTaskCount, 1);
+  assert.equal(summary.totalModelToolTurnCount, 3);
+  assert.equal(summary.totalModelToolCallCount, 5);
   assert.equal(summary.totalTaskVerificationCount, 3);
   assert.equal(summary.totalTaskVerificationFailures, 1);
 });
@@ -97,6 +103,8 @@ test("collectRunMetrics finds metrics artifacts under eval-style nested roots", 
     taskCount: 1,
     modelTaskCount: 1,
     harnessTaskCount: 0,
+    modelToolTurnCount: 0,
+    modelToolCallCount: 0,
     fileEditCount: 1,
     patchEditCount: 0,
     deleteEditCount: 0,

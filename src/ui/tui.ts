@@ -36,6 +36,7 @@ export function renderDashboard(model: DashboardModel, selectedIndex = 0): strin
   lines.push(`  runs=${bench.runCount} completed=${bench.completedCount} failed=${bench.failedCount} awaiting=${bench.awaitingApprovalCount}`);
   lines.push(`  avg_duration_ms=${bench.averageDurationMs} avg_qa=${bench.averageQaScore ?? "-"} model_calls=${bench.totalModelCalls}`);
   lines.push(`  task_routes: model=${bench.totalModelTaskCount} harness=${bench.totalHarnessTaskCount}`);
+  lines.push(`  model_tool_loop: turns=${bench.totalModelToolTurnCount} calls=${bench.totalModelToolCallCount}`);
   lines.push(`  file_edits=${bench.totalFileEdits} patch_edits=${bench.totalPatchEdits} task_verification=${bench.totalTaskVerificationCount} failed_task_verification=${bench.totalTaskVerificationFailures}`);
   lines.push(`  input_tokens=${bench.totalInputTokens} output_tokens=${bench.totalOutputTokens}`);
   lines.push("");
@@ -76,6 +77,7 @@ export function renderDashboard(model: DashboardModel, selectedIndex = 0): strin
     lines.push(`  qa: ${model.selectedMetrics.qaPassed === null ? "-" : model.selectedMetrics.qaPassed} score=${model.selectedMetrics.qaScore ?? "-"}`);
     lines.push(`  context_files: ${model.selectedMetrics.contextFileCount} tasks: ${model.selectedMetrics.taskCount}`);
     lines.push(`  task_routes: model=${model.selectedMetrics.modelTaskCount} harness=${model.selectedMetrics.harnessTaskCount}`);
+    lines.push(`  model_tool_loop: turns=${model.selectedMetrics.modelToolTurnCount} calls=${model.selectedMetrics.modelToolCallCount}`);
     lines.push(`  edits: ${model.selectedMetrics.fileEditCount} patch=${model.selectedMetrics.patchEditCount} delete=${model.selectedMetrics.deleteEditCount}`);
     lines.push(`  reviews: high=${model.selectedMetrics.highRiskReviewCount} blocking=${model.selectedMetrics.blockingReviewCount}`);
     lines.push(`  local_verification: total=${model.selectedMetrics.localVerificationCount} failed=${model.selectedMetrics.localVerificationFailureCount}`);
