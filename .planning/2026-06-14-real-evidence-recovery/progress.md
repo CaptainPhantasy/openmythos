@@ -39,6 +39,24 @@
   - `fixtures/real-eval/trim-js/...`
   - `fixtures/real-eval/suites/daily-workflow-suite.json`
 
+### Phase 3: Replace Narrow Live Gates
+
+- **Status:** complete
+- **Started:** 2026-06-14
+- Actions taken:
+  - Added smoke-mode metadata to `eval` summary artifacts and made `live-eval` the explicit real repository command.
+  - Kept `real-eval` as a compatibility alias to `live-eval`.
+  - Extended real-eval round receipts with run directory, run artifacts, diff-stat, model bindings, and endpoint-bound model metadata.
+  - Updated readiness classification so marker/smoke summaries do not contribute real-outcome evidence.
+  - Added README command examples to separate smoke checks from real evidence commands.
+- Files created/modified:
+  - `src/ui/cli.ts`
+  - `src/core/readiness.ts`
+  - `src/test/readiness.test.ts`
+  - `README.md`
+  - `.planning/2026-06-14-real-evidence-recovery/task_plan.md`
+  - `.planning/2026-06-14-real-evidence-recovery/progress.md`
+
 ### Readiness Evidence Hardening
 
 - **Status:** complete

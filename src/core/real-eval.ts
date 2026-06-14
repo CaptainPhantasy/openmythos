@@ -45,6 +45,39 @@ export interface RealEvalAssessment {
   failures: string[];
 }
 
+export interface RealEvalModelBinding {
+  role: string;
+  adapter: string;
+  model: string;
+  endpoint: string;
+  apiKeyEnv?: string | undefined;
+}
+
+export interface RealEvalRoundResult {
+  round: number;
+  status: string;
+  runId?: string;
+  runDir?: string;
+  repoDir: string;
+  changedFiles: string[];
+  passed: boolean;
+  expectedChangedFilesSatisfied: boolean;
+  prohibitedArtifactsDetected: string[];
+  verificationResults: Array<{ command: string; exitCode: number; durationMs: number }>;
+  failures: string[];
+  diffStat?: string;
+  runArtifacts?: string[];
+  error?: string;
+}
+
+export interface RealEvalResult {
+  goal: string;
+  passed: boolean;
+  rounds: RealEvalRoundResult[];
+  successfulConsecutiveRounds: number;
+  modelBindings: RealEvalModelBinding[];
+}
+
 export function realEvalFixtureRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "../../fixtures/real-eval");
 }
@@ -148,4 +181,14 @@ export async function assessRealEvalFixture(
     prohibitedArtifactsDetected,
     failures
   };
+}
+
+export function snapshotModelBindings(config: OpenMythosConfig): RealEvalModelBinding[] {
+  return Object.entries(config.models).map(([role, model]) => ({
+    role,
+    adapter: model.adapter,
+    model: model.model,
+    endpoint: model.baseUrl ?? "default provider endpoint",
+    apiKeyEnv: model.apiKeyEnv
+  }));
 }

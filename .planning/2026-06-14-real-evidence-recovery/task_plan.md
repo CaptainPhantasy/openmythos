@@ -6,7 +6,7 @@ Replace fake-product claims with real verification paths so OpenMythos can only 
 
 ## Current Phase
 
-Phase 2
+Phase 4
 
 ## Phases
 
@@ -29,11 +29,12 @@ Phase 2
 
 ### Phase 3: Replace Narrow Live Gates With Real Repo Tasks
 
-- [ ] Convert the current live gate into at least one real repository workflow task.
-- [ ] Require non-fake model profiles for live product evidence.
-- [ ] Store model, endpoint, task, diff, verification command, and result artifacts together.
-- [ ] Keep live marker-file gates only as smoke coverage, not product support.
-- **Status:** pending
+- [x] Convert the current live gate into at least one real repository workflow task.
+- [x] Require non-fake model profiles for live product evidence.
+- [x] Store model, endpoint, task, diff, verification command, and result artifacts together.
+- [x] Keep live marker-file gates only as smoke coverage, not product support.
+- [x] Add direct CLI workflow for real repository workflow execution in user-facing docs and readiness classification.
+- **Status:** complete
 
 ### Phase 4: Expand Real Worker Actions
 

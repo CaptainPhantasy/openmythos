@@ -44,8 +44,11 @@ test("buildReadinessReport separates fake regression evidence from product evide
   assert.equal(report.fakeSurface.fakeRunTest, "src/test/fake-run.test.ts");
   assert.equal(report.fakeSurface.fakeDefaultEval, true);
   assert.equal(report.liveEvalSummaries.length, 1);
+  assert.equal(report.summary.smokeEvidenceCount >= 1, true);
   assert.equal(superiority?.fakeEvidence.some((item) => item.id === "fake.regressions"), true);
+  assert.equal(superiority?.fakeEvidence.some((item) => item.id === "live.zai.marker_gate"), true);
   assert.equal(superiority?.missingEvidence.some((item) => item.id === "comparative.baselines.missing"), true);
+  assert.equal(superiority?.realEvidence.every((item) => item.id !== "live.zai.marker_gate"), true);
   assert.ok(report.summary.missingEvidenceCount > 0);
 });
 
@@ -80,7 +83,8 @@ test("outcome-superiority real evidence contains only real evidence items", asyn
     passed: true,
     requiredConsecutiveRounds: 3,
     successfulConsecutiveRounds: 3,
-    profile: "zai-live-gate"
+    profile: "zai-live-gate",
+    evidenceLevel: "smoke"
   }, null, 2), "utf8");
   await writeFile(resolve(root, "runs/real-evals/eval-1/summary.json"), JSON.stringify({
     evidenceLevel: "real",

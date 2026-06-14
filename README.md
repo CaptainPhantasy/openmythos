@@ -135,13 +135,13 @@ npm run claim:port -- 4174
 npm run claim:port -- 4175
 ```
 
-Run the deterministic fake eval:
+Run the smoke marker eval (no repository proof, adapter connectivity only):
 
 ```bash
 node dist/index.js eval --profile fake --rounds 10
 ```
 
-Run the live Z.AI marker-file gate:
+Run a smoke Z.AI marker check (for endpoint health only):
 
 ```bash
 node dist/index.js eval \
@@ -151,14 +151,16 @@ node dist/index.js eval \
   --goal "Create exactly one file named openmythos-live-output.txt whose complete content is OPENMYTHOS_LIVE_SUCCESS followed by a newline. Do not modify any other files."
 ```
 
-Run the retained real repository fixture eval:
+Run the retained real repository eval (real evidence):
 
 ```bash
-node dist/index.js real-eval \
+node dist/index.js live-eval \
   --profile zai-live-gate \
   --fixture noop-js \
   --workdir runs/real-evals
 ```
+
+`real-eval` remains as an alias for `live-eval`.
 
 Run the retained real benchmark suite:
 

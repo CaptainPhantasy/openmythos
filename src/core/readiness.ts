@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { basename, relative, resolve } from "node:path";
 
-export type EvidenceLevel = "real" | "fake" | "missing";
+export type EvidenceLevel = "real" | "smoke" | "fake" | "missing";
 export type ProductGoalStatus = "supported" | "partial" | "unproven";
 
 export interface EvidenceItem {
@@ -33,6 +33,7 @@ export interface FakeSurfaceReport {
 export interface LiveEvalSummary {
   path: string;
   profile: string;
+  evidenceLevel: "real" | "smoke" | "fake";
   passed: boolean;
   requiredConsecutiveRounds: number;
   successfulConsecutiveRounds: number;
@@ -50,6 +51,7 @@ export interface ReadinessReport {
     supportedCount: number;
     partialCount: number;
     unprovenCount: number;
+    smokeEvidenceCount: number;
     fakeEvidenceCount: number;
     realEvidenceCount: number;
     missingEvidenceCount: number;
@@ -80,6 +82,7 @@ export async function buildReadinessReport(repoRoot: string): Promise<ReadinessR
       supportedCount: productGoals.filter((goal) => goal.status === "supported").length,
       partialCount: productGoals.filter((goal) => goal.status === "partial").length,
       unprovenCount: productGoals.filter((goal) => goal.status === "unproven").length,
+      smokeEvidenceCount: allEvidence.filter((item) => item.level === "smoke").length,
       fakeEvidenceCount: allEvidence.filter((item) => item.level === "fake").length,
       realEvidenceCount: allEvidence.filter((item) => item.level === "real").length,
       missingEvidenceCount: allEvidence.filter((item) => item.level === "missing").length
@@ -102,7 +105,13 @@ async function detectFakeSurface(repoRoot: string): Promise<FakeSurfaceReport> {
 
 async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalSummary[]): Promise<ProductGoalAssessment[]> {
   const types = await readOptional(resolve(repoRoot, "src/core/types.ts"));
-  const commandEvidence = evidence("cli.commands", "real", "CLI exposes run, issue, PR, review, bench, eval, real-eval, and TUI commands.", ["src/ui/cli.ts"], []);
+  const commandEvidence = evidence(
+    "cli.commands",
+    "real",
+    "CLI exposes run, issue, PR, review, bench, eval, live-eval, real-eval, real-benchmark, and TUI commands.",
+    ["src/ui/cli.ts"],
+    []
+  );
   const tuiInspectionEvidence = evidence("tui.inspect", "real", "TUI renders run lists, metrics, artifacts, and recent events.", ["src/ui/tui.ts"], []);
   const missingTuiControls = evidence("tui.controls.missing", "missing", "TUI does not expose approval, reject, cancel, queue, or replay actions.", ["src/ui/tui.ts"], ["Add execution-native TUI controls for approval, cancellation, queueing, retry, and replay."]);
 
@@ -110,16 +119,16 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
   const missingTaskTools = ["shell.run", "package.install", "git.branch", "git.stage", "git.commit", "browser.verify", "api.request", "database.query"]
     .filter((tool) => !taskTools.includes(tool));
 
-  const liveGate = strongestLiveGate(liveEvalSummaries);
+  const liveGate = strongestSmokeGate(liveEvalSummaries);
   const liveGateEvidence = liveGate
     ? evidence(
       "live.zai.marker_gate",
-      "real",
-      `Live ${liveGate.profile} eval passed ${liveGate.successfulConsecutiveRounds}/${liveGate.requiredConsecutiveRounds} consecutive marker-file rounds.`,
+      "smoke",
+      `Live ${liveGate.profile} smoke eval passed ${liveGate.successfulConsecutiveRounds}/${liveGate.requiredConsecutiveRounds} consecutive marker-file rounds.`,
       [liveGate.path],
-      ["Treat this as a narrow adapter/harness gate, not full product proof."]
+      ["Run real fixture evals and compare retained outcomes before claiming full product-readiness evidence."]
     )
-    : evidence("live.zai.marker_gate.missing", "missing", "No passed live non-fake eval summary was found under runs/live-evals.", ["runs/live-evals"], ["Run a retained live eval with a non-fake profile."]);
+    : evidence("live.zai.marker_gate.missing", "missing", "No passed live smoke eval summary was found under runs/live-evals.", ["runs/live-evals"], ["Run a retained live-eval with a non-fake profile."]);
   const realEvalSummaries = await collectRealEvalSummaries(repoRoot);
   const strongestRealEval = realEvalSummaries.find((summary) => summary.passed) ?? null;
   const realEvalWorkflowEvidence = existingRelative(repoRoot, "src/core/real-eval.ts") && existingRelative(repoRoot, "fixtures/real-eval/noop-js/manifest.json")
@@ -140,6 +149,11 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
       ["Add direct Claude Code and Codex baseline artifacts for this same fixture."]
     )
     : null;
+
+  const outcomeSuperiorityRealEvidence = [realEvalWorkflowEvidence, realEvalResultEvidence]
+    .filter((item): item is EvidenceItem => item !== null);
+  const outcomeSuperiorityMissingEvidence = [evidence("comparative.baselines.missing", "missing", "No real-task benchmark suite with direct Claude Code and Codex baselines exists.", ["docs/plans/2026-06-14-openmythos-2027-default-harness-roadmap.md"], ["Add real repository benchmark tasks and retained baseline results for direct Claude Code and Codex runs."])]
+    .concat(strongestRealEval === null ? [evidence("real.eval.missing", "missing", "No passed real fixture-backed eval was found under runs/real-evals.", ["runs/real-evals"], ["Run retained live-eval on noop-js or trim-js and keep a real-evidence summary."])] : []);
 
   return [
     goal(
@@ -204,14 +218,12 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
     goal(
       "outcome-superiority",
       "OpenMythos Proves Better Outcomes Than Baseline Harnesses",
-      [liveGate ? liveGateEvidence : null, realEvalWorkflowEvidence, realEvalResultEvidence].filter((item): item is EvidenceItem => Boolean(item)),
+      outcomeSuperiorityRealEvidence,
       [
-        evidence("fake.regressions", "fake", "Fake adapter, fake profile, and fake-run tests cover harness invariants only.", ["src/adapters/fake.ts", "profiles/fake.json", "src/test/fake-run.test.ts"], ["Keep fake coverage as regression-only evidence."])
+        evidence("fake.regressions", "fake", "Fake adapter, fake profile, and fake-run tests cover harness invariants only.", ["src/adapters/fake.ts", "profiles/fake.json", "src/test/fake-run.test.ts"], ["Keep fake coverage as regression-only evidence."]),
+        liveGateEvidence
       ],
-      [
-        evidence("comparative.baselines.missing", "missing", "No real-task benchmark suite with direct Claude Code and Codex baselines exists.", ["docs/plans/2026-06-14-openmythos-2027-default-harness-roadmap.md"], ["Add real repository benchmark tasks and retained baseline results for direct Claude Code and Codex runs."]),
-        liveGate ? evidence("live.gate.scope", "missing", "The retained live gate is a narrow marker-file adapter test, not proof of better daily coding outcomes.", [liveGate.path], ["Replace marker-only claims with real repo task benchmarks."]) : liveGateEvidence
-      ]
+      outcomeSuperiorityMissingEvidence
     )
   ].map(scoreGoal);
 }
@@ -247,7 +259,7 @@ function evidence(
 
 async function collectLiveEvalSummaries(repoRoot: string): Promise<LiveEvalSummary[]> {
   return (await collectEvalSummaries(repoRoot))
-    .filter((summary) => summary.profile !== "fake")
+    .filter((summary) => summary.evidenceLevel === "smoke")
     .sort((a, b) => b.successfulConsecutiveRounds - a.successfulConsecutiveRounds);
 }
 
@@ -257,6 +269,7 @@ async function collectRealEvalSummaries(repoRoot: string): Promise<Array<LiveEva
   for (const summaryPath of summaries) {
     try {
       const raw = JSON.parse(await readFile(summaryPath, "utf8")) as {
+        schemaVersion?: unknown;
         evidenceLevel?: unknown;
         profile?: unknown;
         fixture?: unknown;
@@ -264,11 +277,13 @@ async function collectRealEvalSummaries(repoRoot: string): Promise<Array<LiveEva
         requiredConsecutiveRounds?: unknown;
         successfulConsecutiveRounds?: unknown;
       };
-      if (raw.evidenceLevel !== "real") {
+      const evidenceLevel = parseEvidenceLevel(raw.evidenceLevel, summaryPath);
+      if (evidenceLevel !== "real" && raw.schemaVersion !== "real-eval.v1") {
         continue;
       }
       parsed.push({
         path: relative(repoRoot, summaryPath),
+        evidenceLevel,
         profile: typeof raw.profile === "string" ? raw.profile : "unknown",
         fixture: typeof raw.fixture === "string" ? raw.fixture : "unknown",
         passed: raw.passed === true,
@@ -288,6 +303,7 @@ async function collectEvalSummaries(repoRoot: string): Promise<LiveEvalSummary[]
   for (const summaryPath of summaries) {
     try {
       const raw = JSON.parse(await readFile(summaryPath, "utf8")) as {
+        evidenceLevel?: unknown;
         profile?: unknown;
         passed?: unknown;
         requiredConsecutiveRounds?: unknown;
@@ -295,6 +311,7 @@ async function collectEvalSummaries(repoRoot: string): Promise<LiveEvalSummary[]
       };
       parsed.push({
         path: relative(repoRoot, summaryPath),
+        evidenceLevel: parseEvidenceLevel(raw.evidenceLevel, summaryPath),
         profile: typeof raw.profile === "string" ? raw.profile : "unknown",
         passed: raw.passed === true,
         requiredConsecutiveRounds: typeof raw.requiredConsecutiveRounds === "number" ? raw.requiredConsecutiveRounds : 0,
@@ -307,7 +324,14 @@ async function collectEvalSummaries(repoRoot: string): Promise<LiveEvalSummary[]
   return parsed;
 }
 
-function strongestLiveGate(summaries: LiveEvalSummary[]): LiveEvalSummary | null {
+function parseEvidenceLevel(value: unknown, summaryPath: string): "real" | "smoke" | "fake" {
+  if (value === "real" || value === "smoke" || value === "fake") {
+    return value;
+  }
+  return summaryPath.includes("runs/real-evals") ? "real" : "smoke";
+}
+
+function strongestSmokeGate(summaries: LiveEvalSummary[]): LiveEvalSummary | null {
   return summaries
     .filter((summary) => summary.passed)
     .sort((a, b) => b.successfulConsecutiveRounds - a.successfulConsecutiveRounds)[0] ?? null;
