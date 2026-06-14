@@ -1,0 +1,52 @@
+# Progress Log
+
+## Session: 2026-06-14
+
+### Phase 1: Evidence Inventory And Classification
+
+- **Status:** complete
+- **Started:** 2026-06-14
+- Actions taken:
+  - Confirmed the repo had no existing `.planning` directory.
+  - Read the planning-with-files templates.
+  - Re-read the active roadmap to align the plan with the full product goal.
+  - Created an active planning record for real evidence recovery.
+  - Classified fake tests and fake profiles as regression-only evidence.
+  - Wrote next-worker instructions for replacing fake confidence with real tests and retained artifacts.
+- Files created/modified:
+  - `.planning/.active_plan`
+  - `.planning/2026-06-14-real-evidence-recovery/task_plan.md`
+  - `.planning/2026-06-14-real-evidence-recovery/findings.md`
+  - `.planning/2026-06-14-real-evidence-recovery/progress.md`
+
+### Phase 2: Real Benchmark Harness
+
+- **Status:** pending
+- Actions taken:
+  -
+- Files created/modified:
+  -
+
+## Test Results
+
+| Test | Input | Expected | Actual | Status |
+|------|-------|----------|--------|--------|
+| Git status before planning | `git status --short --branch` | Clean branch against origin | `## main...origin/main` | pass |
+| Planning directory discovery | `find .planning -maxdepth 3 -type f -print` | Existing plan files or no directory | No `.planning` directory existed | pass |
+| Readiness audit after planning | `npm run cli -- readiness --workdir .` | Conservative failure until real/comparative evidence exists | Exit code 1; 6 product goals, 0 supported, 6 partial, 1 fake evidence item, 9 real evidence items, 8 missing evidence items | pass |
+
+## Error Log
+
+| Timestamp | Error | Attempt | Resolution |
+|-----------|-------|---------|------------|
+| 2026-06-14 | No persistent planning state existed for this recovery work. | 1 | Created `.planning/.active_plan` and a dated plan directory. |
+
+## 5-Question Reboot Check
+
+| Question | Answer |
+|----------|--------|
+| Where am I? | Phase 1 is complete; Phase 2 is the next implementation phase. |
+| Where am I going? | Build real benchmark evidence, replace marker-file gates with real repo tasks, expand real worker actions, and enforce product readiness gates. |
+| What's the goal? | Replace fake-product claims with real verification paths so OpenMythos advances only through functional code, retained real-run evidence, and comparative benchmarks. |
+| What have I learned? | Fake tests are useful only for regression; product support requires real or comparative evidence. |
+| What have I done? | Created persistent planning files that instruct future workers how to repair the evidence problem. |

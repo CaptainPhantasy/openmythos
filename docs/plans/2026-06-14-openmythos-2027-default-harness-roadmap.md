@@ -410,6 +410,15 @@ The command must remain conservative. If a product goal is supported only by
 fake evidence or narrow live marker-file gates, it must report the gap instead
 of treating the goal as complete.
 
+The active implementation recovery plan for this evidence problem is:
+
+- `.planning/2026-06-14-real-evidence-recovery/task_plan.md`
+- `.planning/2026-06-14-real-evidence-recovery/findings.md`
+- `.planning/2026-06-14-real-evidence-recovery/progress.md`
+
+Future workers should read those files before changing test, benchmark, or
+readiness behavior.
+
 ## Completion Evidence Required
 
 OpenMythos should not be called the default 2027 harness until the repo can
