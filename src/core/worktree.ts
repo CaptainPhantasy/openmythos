@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
-import { resolve, join, dirname } from "node:path";
+import { resolve, join } from "node:path";
 import { executeCommand } from "../tools/shell.js";
 
 export interface WorktreeHandle {
@@ -11,6 +11,7 @@ export interface WorktreeHandle {
 }
 
 export async function isGitRepo(repoRoot: string): Promise<boolean> {
+  if (!existsSync(resolve(repoRoot, ".git"))) return false;
   const result = await executeCommand("git", ["rev-parse", "--git-dir"], repoRoot, 10000);
   return result.exitCode === 0;
 }

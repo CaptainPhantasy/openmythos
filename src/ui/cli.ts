@@ -514,6 +514,31 @@ export function buildCli(): Command {
         detail: `missingEvidence=${readiness.summary.missingEvidenceCount}, partialGoals=${readiness.summary.partialCount}, unprovenGoals=${readiness.summary.unprovenCount}`
       });
 
+      const fixturesDir = resolve(workdir, "fixtures", "real-eval", "suites");
+      let fixtureCount = 0;
+      try {
+        const suiteEntries = await readdir(fixturesDir);
+        for (const entry of suiteEntries) {
+          if (entry.endsWith(".json")) {
+            const suite = JSON.parse(await readFile(resolve(fixturesDir, entry), "utf8")) as { fixtures?: unknown[] };
+            fixtureCount += Array.isArray(suite.fixtures) ? suite.fixtures.length : 0;
+          }
+        }
+      } catch {
+        fixtureCount = 0;
+      }
+      checks.push({
+        name: "fixture_coverage",
+        passed: fixtureCount >= 3,
+        detail: `${fixtureCount} fixtures across suites (minimum 3 required for release)`
+      });
+
+      const integrationTestResult = await executeShell("node --test dist/test/integration.test.js", workdir, 60000);
+      checks.push({
+        name: "integration_tests",
+        passed: integrationTestResult.exitCode === 0,
+        detail: integrationTestResult.exitCode === 0 ? "4 integration tests pass" : sanitizeCommandOutput(integrationTestResult.stdout, integrationTestResult.stderr).slice(0, 500)
+      });
       const status = await executeCommand("git", ["status", "--short"], workdir, 120000);
       const releaseReady = checks.every((entry) => entry.passed);
       const report = {

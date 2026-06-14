@@ -17,9 +17,10 @@ test("loadRealEvalFixture reads the retained real fixture manifest", async () =>
 test("loadRealEvalSuite reads a retained multi-fixture suite manifest", async () => {
   const suite = await loadRealEvalSuite("daily-workflow-suite");
   assert.equal(suite.id, "daily-workflow-suite");
-  assert.equal(suite.fixtures.length, 2);
+  assert.equal(suite.fixtures.length, 3);
   assert.equal(suite.fixtures[0]?.id, "noop-js");
   assert.equal(suite.fixtures[1]?.id, "trim-js");
+  assert.equal(suite.fixtures[2]?.id, "validate-email");
 });
 
 test("usesFakeAdapter detects fake-backed model configurations", () => {
