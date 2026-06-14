@@ -149,11 +149,20 @@ test("outcome-superiority uses comparative-baseline evidence when both Claude an
   await writeFile(resolve(root, "runs/comparative-baselines/claude-code/summary.json"), JSON.stringify({
     evidenceType: "comparative",
     profile: "claude",
+    fixtures: [
+      {
+        fixture: "noop-js"
+      },
+      {
+        fixture: "trim-js"
+      }
+    ],
     passed: true
   }, null, 2), "utf8");
   await writeFile(resolve(root, "runs/comparative-baselines/codex/summary.json"), JSON.stringify({
     evidenceType: "comparative",
     profile: "codex",
+    fixtures: ["noop-js", "trim-js"],
     passed: true
   }, null, 2), "utf8");
 
@@ -165,6 +174,7 @@ test("outcome-superiority uses comparative-baseline evidence when both Claude an
   assert.equal(superiority?.missingEvidence.some((item) => item.id === "comparative.claude.missing"), false);
   assert.equal(superiority?.missingEvidence.some((item) => item.id === "comparative.codex.missing"), false);
   assert.equal(superiority?.missingEvidence.some((item) => item.id === "comparative.baselines.missing"), false);
+  assert.equal(superiority?.realEvidence.some((item) => item.id === "comparative.outcomes"), true);
 });
 
 test("outcome-superiority real evidence contains only real evidence items", async () => {

@@ -229,14 +229,15 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
       ["Add direct Claude Code and Codex baseline artifacts for this same fixture."]
     )
     : null;
+  const requiredComparativeFixtures = await collectRequiredComparativeFixtures(repoRoot);
   const claudeBaselinePath = resolve(repoRoot, "runs/comparative-baselines/claude-code");
   const codexBaselinePath = resolve(repoRoot, "runs/comparative-baselines/codex");
-  const comparativeBaselineArtifacts = await Promise.all([
-    collectSummaryArtifacts(claudeBaselinePath),
-    collectSummaryArtifacts(codexBaselinePath)
+  const baselineReports = await Promise.all([
+    collectBaselineCoverage(claudeBaselinePath, requiredComparativeFixtures),
+    collectBaselineCoverage(codexBaselinePath, requiredComparativeFixtures)
   ]);
-  const hasClaudeBaseline = comparativeBaselineArtifacts[0].length > 0;
-  const hasCodexBaseline = comparativeBaselineArtifacts[1].length > 0;
+  const hasClaudeBaseline = baselineReports[0].hasAnySummary;
+  const hasCodexBaseline = baselineReports[1].hasAnySummary;
   const comparativeBaselineEvidence: EvidenceItem[] = [];
   if (!hasClaudeBaseline) {
     comparativeBaselineEvidence.push(
@@ -249,13 +250,25 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
       )
     );
   } else {
-    comparativeBaselineEvidence.push(evidence(
-      "comparative.claude.present",
-      "real",
-      "Claude Code comparative baseline artifacts are present.",
-      comparativeBaselineArtifacts[0],
-      []
-    ));
+    if (baselineReports[0].missingFixtures.length > 0) {
+      comparativeBaselineEvidence.push(
+        evidence(
+          "comparative.claude.partial",
+          "real",
+          `Claude Code baseline coverage is partial: ${baselineReports[0].coveredFixtures.join(", ")} present; missing ${baselineReports[0].missingFixtures.join(", ")}.`,
+          baselineReports[0].summaryArtifacts,
+          ["Import a passing Claude Code comparative run for each missing fixture in the daily workflow suite."]
+        )
+      );
+    } else {
+      comparativeBaselineEvidence.push(evidence(
+        "comparative.claude.present",
+        "real",
+        "Claude Code comparative baseline artifacts are present for all required workflow fixtures.",
+        baselineReports[0].summaryArtifacts,
+        []
+      ));
+    }
   }
   if (!hasCodexBaseline) {
     comparativeBaselineEvidence.push(
@@ -268,13 +281,25 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
       )
     );
   } else {
-    comparativeBaselineEvidence.push(evidence(
-      "comparative.codex.present",
-      "real",
-      "Codex comparative baseline artifacts are present.",
-      comparativeBaselineArtifacts[1],
-      []
-    ));
+    if (baselineReports[1].missingFixtures.length > 0) {
+      comparativeBaselineEvidence.push(
+        evidence(
+          "comparative.codex.partial",
+          "real",
+          `Codex baseline coverage is partial: ${baselineReports[1].coveredFixtures.join(", ")} present; missing ${baselineReports[1].missingFixtures.join(", ")}.`,
+          baselineReports[1].summaryArtifacts,
+          ["Import a passing Codex comparative run for each missing fixture in the daily workflow suite."]
+        )
+      );
+    } else {
+      comparativeBaselineEvidence.push(evidence(
+        "comparative.codex.present",
+        "real",
+        "Codex comparative baseline artifacts are present for all required workflow fixtures.",
+        baselineReports[1].summaryArtifacts,
+        []
+      ));
+    }
   }
 
   const outcomeSuperiorityRealEvidence = [realEvalWorkflowEvidence, realEvalResultEvidence, ...comparativeBaselineEvidence.filter((item) => item.level === "real")]
@@ -285,18 +310,22 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
       ? [evidence("real.eval.missing", "missing", "No passed real fixture-backed eval was found under runs/real-evals.", ["runs/real-evals"], ["Run retained live-eval on noop-js or trim-js and keep a real-evidence summary."])]
       : []);
   if (hasClaudeBaseline && hasCodexBaseline) {
+    const hasClaudeCoverage = baselineReports[0].missingFixtures.length === 0;
+    const hasCodexCoverage = baselineReports[1].missingFixtures.length === 0;
     outcomeSuperiorityMissingEvidence.splice(
       outcomeSuperiorityMissingEvidence.findIndex((item) => item.id === "comparative.baselines.missing"),
       1
     );
-    const summaryArtifactEvidence = Array.from(new Set([...comparativeBaselineArtifacts[0], ...comparativeBaselineArtifacts[1]]));
-    outcomeSuperiorityRealEvidence.push(evidence(
-      "comparative.outcomes",
-      "real",
-      "Direct comparative baseline artifacts for Claude Code and Codex are present.",
-      summaryArtifactEvidence,
-      []
-    ));
+    if (hasClaudeCoverage && hasCodexCoverage) {
+      const summaryArtifactEvidence = Array.from(new Set([...baselineReports[0].summaryArtifacts, ...baselineReports[1].summaryArtifacts]));
+      outcomeSuperiorityRealEvidence.push(evidence(
+        "comparative.outcomes",
+        "real",
+        "Direct comparative baseline artifacts for Claude Code and Codex are present for the required workflow fixtures.",
+        summaryArtifactEvidence,
+        []
+      ));
+    }
   }
 
   return [
@@ -421,6 +450,91 @@ async function collectLiveEvalSummaries(repoRoot: string): Promise<LiveEvalSumma
   return (await collectEvalSummaries(repoRoot))
     .filter((summary) => summary.evidenceLevel === "smoke")
     .sort((a, b) => b.successfulConsecutiveRounds - a.successfulConsecutiveRounds);
+}
+
+interface BaselineFixtureCoverage {
+  hasAnySummary: boolean;
+  coveredFixtures: string[];
+  missingFixtures: string[];
+  summaryArtifacts: string[];
+}
+
+async function collectRequiredComparativeFixtures(repoRoot: string): Promise<string[]> {
+  const suitePath = resolve(repoRoot, "fixtures/real-eval/suites/daily-workflow-suite.json");
+  if (!existsSync(suitePath)) {
+    return ["noop-js", "trim-js"];
+  }
+  try {
+    const raw = JSON.parse(await readFile(suitePath, "utf8")) as { fixtures?: unknown };
+    if (Array.isArray(raw.fixtures)) {
+      const fixtureIds = raw.fixtures
+        .map((fixture: unknown) => {
+          if (fixture && typeof fixture === "object" && "id" in fixture && typeof fixture.id === "string") {
+            return fixture.id;
+          }
+          return null;
+        })
+        .filter((fixture): fixture is string => typeof fixture === "string" && fixture.length > 0);
+      if (fixtureIds.length > 0) {
+        return [...new Set(fixtureIds)];
+      }
+    }
+  } catch {
+    return ["noop-js", "trim-js"];
+  }
+  return ["noop-js", "trim-js"];
+}
+
+function parseComparativeSummaryFixtures(rawSummary: Record<string, unknown>): string[] {
+  const fixtureSet = new Set<string>();
+  const fixtureValue = rawSummary.fixture;
+  if (typeof fixtureValue === "string" && fixtureValue.trim().length > 0) {
+    fixtureSet.add(fixtureValue);
+  }
+  if (Array.isArray(rawSummary.fixtures)) {
+    for (const item of rawSummary.fixtures) {
+      if (typeof item === "string") {
+        if (item.trim().length > 0) {
+          fixtureSet.add(item);
+        }
+        continue;
+      }
+      if (item && typeof item === "object" && "fixture" in item && typeof item.fixture === "string" && item.fixture.trim().length > 0) {
+        fixtureSet.add(item.fixture);
+      }
+    }
+  }
+  return [...fixtureSet];
+}
+
+async function collectBaselineCoverage(root: string, requiredFixtures: string[]): Promise<BaselineFixtureCoverage> {
+  const summaryArtifacts = await collectSummaryArtifacts(root);
+  const covered = new Set<string>();
+  for (const summary of summaryArtifacts) {
+    const absoluteSummaryPath = resolve(root, summary);
+    try {
+      const raw = JSON.parse(await readFile(absoluteSummaryPath, "utf8")) as Record<string, unknown>;
+      const fixtures = parseComparativeSummaryFixtures(raw);
+      const passed = raw.passed === true;
+      if (!passed) {
+        continue;
+      }
+      for (const fixture of fixtures) {
+        if (requiredFixtures.includes(fixture)) {
+          covered.add(fixture);
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+  const missingFixtures = requiredFixtures.filter((fixture) => !covered.has(fixture));
+  return {
+    hasAnySummary: summaryArtifacts.length > 0,
+    coveredFixtures: Array.from(covered),
+    missingFixtures,
+    summaryArtifacts
+  };
 }
 
 async function collectRealEvalSummaries(repoRoot: string): Promise<Array<LiveEvalSummary & { fixture: string }>> {

@@ -199,6 +199,13 @@ node dist/index.js tui
 node dist/index.js tui --workdir <project-or-round-workdir> --once
 ```
 
+Import comparative baseline artifacts for outcome-superiority evidence:
+
+```bash
+node dist/index.js record-baseline claude-code <path-to-claude-run> --workdir .
+node dist/index.js record-baseline codex <path-to-codex-run> --workdir .
+```
+
 Benchmark retained metrics:
 
 ```bash

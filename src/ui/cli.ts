@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { cp, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { basename, resolve } from "node:path";
 import { loadConfigWithOptionalProfile } from "../config/profile.js";
 import { resolveIssueSource } from "../core/issues.js";
 import { collectRunMetrics, summarizeBench } from "../core/metrics.js";
@@ -664,6 +664,85 @@ export function buildCli(): Command {
       }
     });
 
+  program.command("record-baseline")
+    .description("Import retained comparative benchmark artifacts for Claude Code or Codex")
+    .argument("<provider>", "baseline provider: claude-code or codex")
+    .argument("<source>", "Baseline run directory containing summary.json")
+    .option("-w, --workdir <path>", "Target repository root", ".")
+    .option("-n, --name <name>", "Destination run folder name (defaults to source directory name)")
+    .action(async (
+      providerArg: string,
+      source: string,
+      options: { workdir: string; name?: string }
+    ) => {
+      const workdir = resolve(options.workdir);
+      const provider = normalizeProvider(providerArg);
+      if (!provider) {
+        console.error(`Unsupported baseline provider: ${providerArg}. Use claude-code or codex.`);
+        process.exitCode = 1;
+        return;
+      }
+
+      const sourceDir = resolve(source);
+      try {
+        const sourceStats = await stat(sourceDir);
+        if (!sourceStats.isDirectory()) {
+          console.error("record-baseline expects a source directory path containing summary.json");
+          process.exitCode = 1;
+          return;
+        }
+      } catch {
+        console.error(`record-baseline source does not exist: ${sourceDir}`);
+        process.exitCode = 1;
+        return;
+      }
+
+      const sourceSummary = await findSummaryJson(sourceDir, 12);
+      if (!sourceSummary) {
+        console.error(`No summary.json found beneath source: ${sourceDir}`);
+        process.exitCode = 1;
+        return;
+      }
+
+      const summaryPayload = await parseComparativeSummary(sourceSummary);
+      if (!summaryPayload) {
+        console.error(`summary.json at ${sourceSummary} is missing required comparative evidence fields.`);
+        process.exitCode = 1;
+        return;
+      }
+
+      const destinationRoot = resolve(workdir, "runs/comparative-baselines", provider);
+      const baseName = options.name ?? basename(sourceDir);
+      let destination = resolve(destinationRoot, baseName);
+      let counter = 2;
+      while (existsSync(destination)) {
+        destination = resolve(destinationRoot, `${baseName}-${counter}`);
+        counter += 1;
+      }
+
+      await mkdir(destinationRoot, { recursive: true });
+      await cp(sourceDir, destination, { recursive: true });
+
+      const manifest = {
+        importedAt: new Date().toISOString(),
+        provider,
+        sourceSummary,
+        destination,
+        summary: summaryPayload
+      };
+      await writeFile(resolve(destination, "record-baseline.json"), JSON.stringify(manifest, null, 2), "utf8");
+
+      console.log(JSON.stringify({
+        action: "record-baseline",
+        status: "ok",
+        provider,
+        destination,
+        fixtureCoverage: summaryPayload.fixtures,
+        passed: summaryPayload.passed,
+        evidenceMode: summaryPayload.mode
+      }, null, 2));
+    });
+
   program.command("status")
     .argument("<runId>", "Run id")
     .option("-w, --workdir <path>", "Target working directory", ".")
@@ -845,6 +924,99 @@ function sanitizeCommandOutput(...parts: string[]): string {
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function normalizeProvider(value: string): "claude-code" | "codex" | null {
+  const normalized = value.trim().toLowerCase();
+  if (["claude", "claude-code", "claude code"].includes(normalized)) {
+    return "claude-code";
+  }
+  if (["codex"].includes(normalized)) {
+    return "codex";
+  }
+  return null;
+}
+
+async function findSummaryJson(root: string, maxDepth: number, currentDepth = 0): Promise<string | null> {
+  if (currentDepth > maxDepth) {
+    return null;
+  }
+  const entries = await readdir(root, { withFileTypes: true });
+  for (const entry of entries) {
+    const path = resolve(root, entry.name);
+    if (entry.isFile() && entry.name === "summary.json") {
+      return path;
+    }
+    if (entry.isDirectory()) {
+      const nested = await findSummaryJson(path, maxDepth, currentDepth + 1);
+      if (nested) {
+        return nested;
+      }
+    }
+  }
+  return null;
+}
+
+async function parseComparativeSummary(summaryPath: string): Promise<{
+  mode: string;
+  passed: boolean;
+  fixtures: string[];
+} | null> {
+  const raw = JSON.parse(await readFile(summaryPath, "utf8")) as {
+    evidenceType?: unknown;
+    fixture?: unknown;
+    fixtures?: unknown;
+    mode?: unknown;
+    schemaVersion?: unknown;
+    suiteId?: unknown;
+    passed?: unknown;
+    scoring?: unknown;
+  };
+
+  const evidenceType = raw.evidenceType === "comparative" || raw.evidenceType === "real" || raw.evidenceType === "smoke" || raw.evidenceType === "fake"
+    ? raw.evidenceType
+    : undefined;
+  const passed = raw.passed === true;
+  const mode = typeof raw.mode === "string" ? raw.mode : "unknown";
+
+  const fixtures = new Set<string>();
+  if (typeof raw.fixture === "string" && raw.fixture.trim().length > 0) {
+    fixtures.add(raw.fixture);
+  }
+  if (Array.isArray(raw.fixtures)) {
+    for (const fixtureEntry of raw.fixtures) {
+      if (typeof fixtureEntry === "string" && fixtureEntry.trim().length > 0) {
+        fixtures.add(fixtureEntry);
+        continue;
+      }
+      if (fixtureEntry && typeof fixtureEntry === "object" && "fixture" in fixtureEntry && typeof fixtureEntry.fixture === "string") {
+        if (fixtureEntry.fixture.trim().length > 0) {
+          fixtures.add(fixtureEntry.fixture);
+        }
+      }
+    }
+  }
+
+  const hasExpectedShape =
+    typeof evidenceType === "string" ||
+    typeof raw.schemaVersion === "string" ||
+    typeof raw.suiteId === "string";
+  if (!hasExpectedShape) {
+    return null;
+  }
+  if (!passed && fixtures.size === 0) {
+    return {
+      mode,
+      passed,
+      fixtures: []
+    };
+  }
+
+  return {
+    mode,
+    passed,
+    fixtures: [...fixtures]
+  };
 }
 
 function countLeadingPassed(results: Array<{ passed: boolean }>): number {
