@@ -33,6 +33,7 @@ exhausted.
 - Governance preflight for git-required mode, dirty-worktree policy, and protected branches.
 - Local verification commands before model QA.
 - Structured `review` command for local git diffs with machine-readable findings.
+- Issue ingestion from local files and GitHub issue references.
 - Adapter profiles for fake, Z.AI GLM coding, and frontier model experiments.
 - Retained `metrics.json` artifacts and benchmark aggregation with `bench`.
 - Consecutive-round eval command for proving harness stability.
@@ -167,6 +168,15 @@ node dist/index.js review --cached
 node dist/index.js review --base origin/main --head HEAD
 ```
 
+Resolve or run from an issue:
+
+```bash
+node dist/index.js issue docs/issues/example.md
+node dist/index.js issue owner/repo#42
+node dist/index.js run-issue docs/issues/example.md
+node dist/index.js run-issue https://github.com/owner/repo/issues/42
+```
+
 Approval policy:
 
 - `approval.mode = "suggest"` writes per-task review artifacts without blocking.
@@ -199,6 +209,8 @@ Each run writes an inspectable artifact set:
 - `plan.json`: schema-validated execution plan.
 - `outputs.json`: schema-validated worker outputs and file edits.
 - `qa.json`: local and model verification result.
+- `issue.json`: canonical issue payload when a run was started from an issue
+  source.
 - `governance.json`: repository preflight result, including dirty-tree and
   branch-policy findings.
 - `metrics.json`: retained run metrics, including model calls, token totals,

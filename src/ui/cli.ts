@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { loadConfigWithOptionalProfile } from "../config/profile.js";
+import { resolveIssueSource } from "../core/issues.js";
 import { collectRunMetrics, summarizeBench } from "../core/metrics.js";
 import { runReview } from "../core/reviewer.js";
 import { Runner } from "../core/runner.js";
@@ -15,7 +16,7 @@ export function buildCli(): Command {
   program
     .name("openmythos")
     .description("Deterministic multi-model orchestration harness")
-    .version("0.4.0");
+    .version("0.5.0");
 
   program.command("run")
     .argument("<goal>", "Goal to execute")
@@ -37,6 +38,34 @@ export function buildCli(): Command {
       const { runner } = await runtime(options.config, options.workdir, options.profile);
       const result = await runner.resume(runId);
       console.log(JSON.stringify(result, null, 2));
+    });
+
+  program.command("run-issue")
+    .argument("<source>", "Issue source: local file, issue number, owner/repo#number, or GitHub issue URL")
+    .option("-c, --config <path>", "Config file", "openmythos.config.json")
+    .option("-p, --profile <nameOrPath>", "Config profile overlay")
+    .option("-w, --workdir <path>", "Target working directory", ".")
+    .action(async (source: string, options: { config: string; profile?: string; workdir: string }) => {
+      const { runner, config } = await runtime(options.config, options.workdir, options.profile);
+      const resolved = await resolveIssueSource(source, resolve(options.workdir), config.execution.timeoutMs);
+      const result = await runner.runFromIssue(resolved.issue, resolved.goal);
+      console.log(JSON.stringify({
+        issue: resolved.issue,
+        goal: resolved.goal,
+        result
+      }, null, 2));
+    });
+
+  program.command("issue")
+    .description("Resolve an issue source into canonical harness input")
+    .argument("<source>", "Issue source: local file, issue number, owner/repo#number, or GitHub issue URL")
+    .option("-c, --config <path>", "Config file", "openmythos.config.json")
+    .option("-p, --profile <nameOrPath>", "Config profile overlay")
+    .option("-w, --workdir <path>", "Target working directory", ".")
+    .action(async (source: string, options: { config: string; profile?: string; workdir: string }) => {
+      const { config } = await runtime(options.config, options.workdir, options.profile);
+      const resolved = await resolveIssueSource(source, resolve(options.workdir), config.execution.timeoutMs);
+      console.log(JSON.stringify(resolved, null, 2));
     });
 
   program.command("eval")

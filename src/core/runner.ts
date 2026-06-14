@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import type { OpenMythosConfig } from "../config/schema.js";
 import { AdapterRegistry } from "../adapters/registry.js";
@@ -8,7 +9,7 @@ import { PhaseExecutor } from "./phases.js";
 import { evaluateGovernance, GovernanceViolationError } from "./governance.js";
 import { ApprovalRequiredError } from "./review.js";
 import { buildRunMetrics } from "./metrics.js";
-import type { ContextResult, IntakeResult, Plan, QaResult, TaskOutput } from "./types.js";
+import type { ContextResult, IntakeResult, IssueContext, Plan, QaResult, TaskOutput } from "./types.js";
 
 export interface RunResult {
   runId: string;
@@ -28,6 +29,14 @@ export class Runner {
     const governance = await evaluateGovernance(this.config, this.workdir);
     const runId = randomUUID();
     await this.store.createRun(runId, goal, this.config.execution.maxRetries);
+    return this.executeFrom(runId, goal, governance);
+  }
+
+  async runFromIssue(issue: IssueContext, goal: string): Promise<RunResult> {
+    const governance = await evaluateGovernance(this.config, this.workdir);
+    const runId = randomUUID();
+    await this.store.createRun(runId, goal, this.config.execution.maxRetries);
+    await this.store.writeArtifact(runId, "issue.json", issue);
     return this.executeFrom(runId, goal, governance);
   }
 
@@ -235,10 +244,12 @@ export class Runner {
       "plan.json",
       "outputs.json",
       "qa.json",
+      "issue.json",
       "governance.json",
       "metrics.json",
       "final.md"
-    ].map((file) => resolve(root, file));
+    ].map((file) => resolve(root, file))
+      .filter((file) => existsSync(file));
 
     const { readdir } = await import("node:fs/promises");
     try {

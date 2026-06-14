@@ -1,6 +1,6 @@
 {
   "name": "openmythos",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Deterministic multi-model orchestration harness where code owns the loop.",
   "license": "MIT",
   "type": "module",

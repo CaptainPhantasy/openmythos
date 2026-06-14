@@ -98,6 +98,19 @@ export interface ReviewResult {
   strengths: string[];
 }
 
+export interface IssueContext {
+  source: "local-file" | "github";
+  reference: string;
+  title: string;
+  body: string;
+  labels: string[];
+  url?: string;
+  number?: number;
+  repository?: string;
+  state?: string;
+  author?: string;
+}
+
 export interface AdapterMessage {
   role: "user" | "assistant";
   content: string;

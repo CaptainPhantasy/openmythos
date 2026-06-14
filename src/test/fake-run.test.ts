@@ -32,6 +32,7 @@ test("Runner completes a full deterministic fake-adapter run", async () => {
   assert.ok(metrics.contextFileCount >= 0);
   assert.ok(metrics.modelUsage.length > 0);
   assert.ok(metrics.modelUsage.some((entry) => entry.role === "planner" && entry.calls >= 1));
+  assert.ok(result.artifacts.some((artifact) => artifact.endsWith("issue.json")) === false);
 });
 
 test("Runner can stop in awaiting_approval before applying risky edits", async () => {
