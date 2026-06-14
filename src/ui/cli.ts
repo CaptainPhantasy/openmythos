@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { existsSync } from "node:fs";
-import { cp, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { discoverConfigPath, formatConfigDiscoveryFailure } from "../config/discovery.js";
 import { loadConfigWithOptionalProfile } from "../config/profile.js";
@@ -31,7 +31,9 @@ import { loadMemory, addNote, searchMemory, clearMemory, addDecision } from "../
 import { scanForSecrets, auditDependencies, assessCommandRisk, summarizeRisk } from "../core/guardrails.js";
 import { explainPlan, explainVerification, formatExplanation } from "../core/explanation.js";
 import { defaultRoutingPolicies, routeModel, classifyComplexity, classifyRisk } from "../core/model-routing.js";
-
+import { runInit, getProviderPresets } from "../core/init.js";
+import { createChatSession, runChatRepl } from "./chat.js";
+import { AdapterRegistry } from "../adapters/registry.js";
 export function buildCli(): Command {
   const program = new Command();
 
@@ -1051,7 +1053,403 @@ export function buildCli(): Command {
         console.log("\nOnboarding complete. Try: openmythos run \"your goal\"");
       }
     });
+
+  program.command("init")
+    .description("Create an openmythos.config.json from detected API keys or a specified provider")
+    .option("-w, --workdir <path>", "Target working directory", ".")
+    .option("-p, --provider <id>", "Provider preset: zai, openai, anthropic, gemini")
+    .action(async (options: { workdir: string; provider?: string }) => {
+      const workdir = resolve(options.workdir);
+      try {
+        const result = await runInit(workdir, options.provider);
+        if (result.alreadyExisted) {
+          console.log(`Config already exists at ${result.configPath}`);
+          console.log("Delete it first if you want to regenerate.");
+          return;
+        }
+        console.log(`Created ${result.configPath}`);
+        console.log(`Provider: ${result.provider}`);
+        console.log(`API key env: ${result.apiKeyEnv}`);
+        console.log(`API key present: ${result.apiKeyPresent ? "yes" : "NO — set " + result.apiKeyEnv + " in your environment"}`);
+        console.log("\nNext steps:");
+        console.log("  openmythos run \"your goal\"");
+        console.log("  openmythos chat");
+        if (!result.apiKeyPresent) {
+          process.exitCode = 1;
+        }
+      } catch (error) {
+        console.error(`Init failed: ${(error as Error).message}`);
+        console.error("\nAvailable providers:");
+        for (const preset of getProviderPresets()) {
+          console.error(`  ${preset.id}: ${preset.name} (requires ${preset.apiKeyEnv})`);
+        }
+        process.exitCode = 1;
+      }
+    });
+
+  program.command("chat")
+    .description("Start an interactive coding chat session")
+    .option("-c, --config <path>", "Config file", "openmythos.config.json")
+    .option("-p, --profile <nameOrPath>", "Config profile overlay")
+    .option("-w, --workdir <path>", "Target working directory", ".")
+    .action(async (options: { config: string; profile?: string; workdir: string }) => {
+      const { config, adapters, workdir: resolvedWorkdir } = await chatRuntime(options.config, options.workdir, options.profile);
+      const session = createChatSession(resolvedWorkdir, config, adapters);
+      await runChatRepl(session);
+    });
+
+  // === FILE OPERATIONS ===
+  program.command("read")
+    .description("Read and display a file")
+    .argument("<path>", "File path to read")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .option("-l, --lines <n>", "Max lines to show", parsePositiveInt, 500)
+    .action(async (filePath: string, options: { workdir: string; lines: number }) => {
+      const abs = resolve(options.workdir, filePath);
+      const content = await readFile(abs, "utf8");
+      const lines = content.split("\n").slice(0, options.lines);
+      lines.forEach((line, i) => console.log(`${String(i + 1).padStart(4)}: ${line}`));
+    });
+
+  program.command("write")
+    .description("Write content to a file (use --stdin for piped input)")
+    .argument("<path>", "File path to write")
+    .argument("[content]", "Content to write (omit and use --stdin for piped input)")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .option("--stdin", "Read content from stdin")
+    .option("--append", "Append to file instead of overwriting")
+    .action(async (filePath: string, content: string | undefined, options: { workdir: string; stdin?: boolean; append?: boolean }) => {
+      const abs = resolve(options.workdir, filePath);
+      let text = content ?? "";
+      if (options.stdin) {
+        text = await readStdin();
+      }
+      if (options.append) {
+        const existing = existsSync(abs) ? await readFile(abs, "utf8") : "";
+        text = existing + text;
+      }
+      await writeFile(abs, text, "utf8");
+      console.log(`Wrote ${text.length} chars to ${filePath}`);
+    });
+
+  program.command("edit")
+    .description("Find and replace text in a file")
+    .argument("<path>", "File path to edit")
+    .argument("<find>", "Text to find")
+    .argument("<replace>", "Replacement text")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .option("--all", "Replace all occurrences (default: first only)")
+    .action(async (filePath: string, find: string, replace: string, options: { workdir: string; all?: boolean }) => {
+      const abs = resolve(options.workdir, filePath);
+      const content = await readFile(abs, "utf8");
+      const flags = options.all ? "g" : "";
+      const regex = new RegExp(find.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), flags);
+      const count = (content.match(regex) || []).length;
+      const updated = content.replace(regex, replace);
+      await writeFile(abs, updated, "utf8");
+      console.log(`Replaced ${count} occurrence(s) in ${filePath}`);
+    });
+
+  program.command("search")
+    .description("Search file contents (regex supported)")
+    .argument("<pattern>", "Search pattern")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .option("-p, --path <dir>", "Search within this subdirectory")
+    .option("-i, --ignore-case", "Case-insensitive search")
+    .option("--ext <extensions>", "Comma-separated file extensions to include")
+    .action(async (pattern: string, options: { workdir: string; path?: string; ignoreCase?: boolean; ext?: string }) => {
+      const searchPath = resolve(options.workdir, options.path ?? ".");
+      const results = await searchFiles(pattern, searchPath, options.ignoreCase ?? false, options.ext);
+      if (results.length === 0) { console.log("No matches found."); return; }
+      for (const result of results) {
+        for (const line of result.matches) {
+          console.log(`${result.file}:${line.num}: ${line.text}`);
+        }
+      }
+      console.log(`\n${results.length} file(s), ${results.reduce((s, r) => s + r.matches.length, 0)} match(es)`);
+    });
+
+  program.command("ls")
+    .description("List files in a directory")
+    .argument("[path]", "Directory to list", ".")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .option("-a, --all", "Show hidden files")
+    .action(async (dirPath: string, options: { workdir: string; all?: boolean }) => {
+      const abs = resolve(options.workdir, dirPath);
+      const entries = await readdir(abs);
+      const filtered = options.all ? entries : entries.filter((e) => !e.startsWith("."));
+      for (const entry of filtered.sort()) {
+        const statResult = await stat(resolve(abs, entry));
+        const type = statResult.isDirectory() ? "dir " : "file";
+        const size = statResult.isFile() ? String(statResult.size).padStart(8) : "       -";
+        console.log(`${type} ${size}  ${entry}`);
+      }
+    });
+
+  // === GIT OPERATIONS ===
+  program.command("diff")
+    .description("Show git diff")
+    .argument("[path]", "Path to diff", ".")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .option("--cached", "Show staged changes")
+    .action(async (path: string, options: { workdir: string; cached?: boolean }) => {
+      const args = ["diff"];
+      if (options.cached) args.push("--cached");
+      if (path !== ".") args.push(path);
+      const result = await executeCommand("git", args, resolve(options.workdir), 30000);
+      console.log(result.stdout || "(no changes)");
+    });
+
+  program.command("log")
+    .description("Show git log")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .option("-n, --count <n>", "Number of commits", parsePositiveInt, 20)
+    .option("--oneline", "One-line format")
+    .action(async (options: { workdir: string; count: number; oneline?: boolean }) => {
+      const args = ["log", `-${options.count}`];
+      if (options.oneline) args.push("--oneline");
+      const result = await executeCommand("git", args, resolve(options.workdir), 15000);
+      console.log(result.stdout);
+    });
+
+  program.command("gst")
+    .description("Show git status (use 'status' for run status)")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .option("--short", "Short format")
+    .action(async (options: { workdir: string; short?: boolean }) => {
+      const args = ["status"];
+      if (options.short) args.push("--short");
+      const result = await executeCommand("git", args, resolve(options.workdir), 15000);
+      console.log(result.stdout);
+    });
+
+  program.command("push")
+    .description("Push commits to remote")
+    .argument("[remote]", "Remote name", "origin")
+    .argument("[branch]", "Branch name")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .option("--force", "Force push")
+    .action(async (remote: string, branch: string | undefined, options: { workdir: string; force?: boolean }) => {
+      const args = ["push"];
+      if (options.force) args.push("--force");
+      args.push(remote);
+      if (branch) args.push(branch);
+      const result = await executeCommand("git", args, resolve(options.workdir), 60000);
+      if (result.exitCode !== 0) { console.error(result.stderr); process.exitCode = 1; }
+      else console.log(result.stdout || "Pushed.");
+    });
+
+  program.command("pull")
+    .description("Pull from remote")
+    .argument("[remote]", "Remote name", "origin")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .option("--rebase", "Rebase instead of merge")
+    .action(async (remote: string, options: { workdir: string; rebase?: boolean }) => {
+      const args = ["pull"];
+      if (options.rebase) args.push("--rebase");
+      args.push(remote);
+      const result = await executeCommand("git", args, resolve(options.workdir), 60000);
+      if (result.exitCode !== 0) { console.error(result.stderr); process.exitCode = 1; }
+      else console.log(result.stdout || "Pulled.");
+    });
+
+  program.command("checkout")
+    .description("Checkout a branch or create a new one")
+    .argument("<branch>", "Branch name")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .option("-b", "Create a new branch")
+    .action(async (branch: string, options: { workdir: string; b?: boolean }) => {
+      const args = ["checkout"];
+      if (options.b) args.push("-b");
+      args.push(branch);
+      const result = await executeCommand("git", args, resolve(options.workdir), 15000);
+      if (result.exitCode !== 0) { console.error(result.stderr); process.exitCode = 1; }
+      else console.log(`Switched to ${branch}`);
+    });
+
+  program.command("merge")
+    .description("Merge a branch into the current branch")
+    .argument("<branch>", "Branch to merge")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .option("--no-ff", "Create a merge commit even if fast-forward")
+    .action(async (branch: string, options: { workdir: string; noff?: boolean }) => {
+      const args = ["merge"];
+      if (options.noff) args.push("--no-ff");
+      args.push(branch);
+      const result = await executeCommand("git", args, resolve(options.workdir), 30000);
+      if (result.exitCode !== 0) { console.error(result.stderr); process.exitCode = 1; }
+      else console.log(result.stdout || `Merged ${branch}`);
+    });
+
+  // === SHELL & BUILD ===
+  program.command("exec")
+    .description("Execute a shell command")
+    .argument("<command>", "Shell command to execute")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .option("--timeout <ms>", "Timeout in ms", parsePositiveInt, 120000)
+    .action(async (command: string, options: { workdir: string; timeout: number }) => {
+      const result = await executeShell(command, resolve(options.workdir), options.timeout);
+      process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exitCode = result.exitCode;
+    });
+
+  program.command("test")
+    .description("Run project tests (auto-detects framework)")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .option("-- <args...>", "Pass additional arguments to test runner")
+    .allowUnknownOption(true)
+    .action(async (options: { workdir: string }) => {
+      const workdir = resolve(options.workdir);
+      const cmd = await autoDetectCommand(workdir, [
+        { check: "package.json", cmd: "npm test" },
+        { check: "Cargo.toml", cmd: "cargo test" },
+        { check: "go.mod", cmd: "go test ./..." },
+        { check: "pyproject.toml", cmd: "pytest" },
+        { check: "pytest.ini", cmd: "pytest" },
+        { check: "Makefile", cmd: "make test" },
+      ]);
+      if (!cmd) { console.error("Could not detect test runner. Use: openmythos exec '<test-command>'"); process.exitCode = 1; return; }
+      console.log(`Running: ${cmd}`);
+      const result = await executeShell(cmd, workdir, 300000);
+      process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exitCode = result.exitCode;
+    });
+
+  program.command("build")
+    .description("Run project build (auto-detects)")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .action(async (options: { workdir: string }) => {
+      const workdir = resolve(options.workdir);
+      const cmd = await autoDetectCommand(workdir, [
+        { check: "package.json", cmd: "npm run build", jsonCheck: "build" },
+        { check: "Cargo.toml", cmd: "cargo build" },
+        { check: "go.mod", cmd: "go build ./..." },
+        { check: "Makefile", cmd: "make" },
+      ]);
+      if (!cmd) { console.error("Could not detect build command."); process.exitCode = 1; return; }
+      console.log(`Running: ${cmd}`);
+      const result = await executeShell(cmd, workdir, 300000);
+      process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exitCode = result.exitCode;
+    });
+
+  program.command("lint")
+    .description("Run linter (auto-detects)")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .option("--fix", "Auto-fix issues")
+    .action(async (options: { workdir: string; fix?: boolean }) => {
+      const workdir = resolve(options.workdir);
+      let cmd: string | null = null;
+      if (existsSync(resolve(workdir, "package.json"))) {
+        const pkg = JSON.parse(await readFile(resolve(workdir, "package.json"), "utf8"));
+        if (pkg.scripts?.lint) cmd = options.fix ? "npm run lint -- --fix" : "npm run lint";
+        else if (existsSync(resolve(workdir, ".eslintrc.js")) || existsSync(resolve(workdir, ".eslintrc.json")) || existsSync(resolve(workdir, "eslint.config.js"))) {
+          cmd = options.fix ? "npx eslint . --fix" : "npx eslint .";
+        }
+      } else if (existsSync(resolve(workdir, "Cargo.toml"))) cmd = "cargo clippy";
+      else if (existsSync(resolve(workdir, "go.mod"))) cmd = "go vet ./...";
+      if (!cmd) { console.error("Could not detect linter."); process.exitCode = 1; return; }
+      console.log(`Running: ${cmd}`);
+      const result = await executeShell(cmd, workdir, 120000);
+      process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exitCode = result.exitCode;
+    });
+
+  // === META COMMANDS ===
+  program.command("config")
+    .description("Show current configuration")
+    .option("-c, --config <path>", "Config file", "openmythos.config.json")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .option("-p, --profile <name>", "Profile name")
+    .action(async (options: { config: string; workdir: string; profile?: string }) => {
+      const configResolution = discoverConfigPath(options.config, resolve(options.workdir));
+      const config = await loadConfigWithOptionalProfile(configResolution.path, options.profile);
+      console.log(JSON.stringify(config, null, 2));
+    });
+
+  program.command("doctor")
+    .description("Diagnose environment health and configuration")
+    .option("-c, --config <path>", "Config file", "openmythos.config.json")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .action(async (options: { config: string; workdir: string }) => {
+      const workdir = resolve(options.workdir);
+      const configResolution = discoverConfigPath(options.config, workdir);
+      console.log("=== OpenMythos Doctor ===\n");
+      console.log(`Working directory: ${workdir}`);
+      console.log(`Config path: ${configResolution.path}`);
+      console.log(`Config found: ${existsSync(configResolution.path) ? "YES" : "NO"}`);
+      const gitResult = await executeCommand("git", ["rev-parse", "--is-inside-work-tree"], workdir, 5000);
+      console.log(`Git repo: ${gitResult.exitCode === 0 ? "YES" : "NO"}`);
+      const nodeResult = await executeCommand("node", ["--version"], workdir, 5000);
+      console.log(`Node: ${nodeResult.stdout.trim() || "not found"}`);
+      const presets = getProviderPresets();
+      for (const preset of presets) {
+        const has = !!process.env[preset.apiKeyEnv];
+        console.log(`${has ? "✓" : "✗"} ${preset.name}: ${preset.apiKeyEnv} ${has ? "set" : "not set"}`);
+      }
+      if (existsSync(configResolution.path)) {
+        const report = await runSetupCheck({ workdir, configPath: configResolution.path });
+        console.log(`\nSetup check: ${report.passed ? "PASS" : "FAIL"}`);
+        for (const err of report.errors) console.log(`  ERROR: ${err.summary}`);
+        for (const warn of report.warnings) console.log(`  WARN:  ${warn.summary}`);
+      }
+    });
+
+  program.command("history")
+    .description("Show recent runs")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .option("-n, --count <n>", "Number of runs", parsePositiveInt, 10)
+    .action(async (options: { workdir: string; count: number }) => {
+      const runsDir = resolve(options.workdir, "runs");
+      if (!existsSync(runsDir)) { console.log("No runs found."); return; }
+      const entries = await readdir(runsDir);
+      const recent = entries.sort().reverse().slice(0, options.count);
+      for (const entry of recent) {
+        const statePath = resolve(runsDir, entry, "state.json");
+        if (!existsSync(statePath)) continue;
+        try {
+          const state = JSON.parse(await readFile(statePath, "utf8"));
+          console.log(`${state.status?.padEnd(20)} ${entry}`);
+        } catch { /* skip */ }
+      }
+    });
+
+  program.command("clean")
+    .description("Clean up run artifacts")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .option("--all", "Remove all runs (default: keep last 10)")
+    .option("--dry-run", "Show what would be deleted without deleting")
+    .action(async (options: { workdir: string; all?: boolean; dryRun?: boolean }) => {
+      const runsDir = resolve(options.workdir, "runs");
+      if (!existsSync(runsDir)) { console.log("Nothing to clean."); return; }
+      const entries = (await readdir(runsDir)).sort();
+      const toDelete = options.all ? entries : entries.slice(0, Math.max(0, entries.length - 10));
+      if (toDelete.length === 0) { console.log("Nothing to clean."); return; }
+      for (const entry of toDelete) {
+        const fullPath = resolve(runsDir, entry);
+        if (options.dryRun) { console.log(`WOULD DELETE: ${entry}`); }
+        else { await rm(fullPath, { recursive: true, force: true }); console.log(`Deleted: ${entry}`); }
+      }
+      console.log(`${options.dryRun ? "Would delete" : "Deleted"} ${toDelete.length} run(s).`);
+    });
+
   return program;
+}
+
+async function chatRuntime(configPath: string, workdirPath: string, profile?: string): Promise<{ config: Awaited<ReturnType<typeof loadConfigWithOptionalProfile>>; adapters: AdapterRegistry; workdir: string }> {
+  const resolvedWorkdir = resolve(workdirPath);
+  const configResolution = discoverConfigPath(configPath, resolvedWorkdir);
+  const configFile = configResolution.path;
+  if (!existsSync(configFile)) {
+    throw new Error(formatConfigDiscoveryFailure(configResolution));
+  }
+  const config = await loadConfigWithOptionalProfile(configFile, profile);
+  const adapters = new AdapterRegistry(config);
+  return { config, adapters, workdir: resolvedWorkdir };
 }
 
 async function runtime(configPath: string, workdirPath: string, profile?: string): Promise<{ runner: Runner; store: StateStore; config: Awaited<ReturnType<typeof loadConfigWithOptionalProfile>> }> {
@@ -1067,6 +1465,76 @@ async function runtime(configPath: string, workdirPath: string, profile?: string
   return { runner: new Runner(config, store, workdir), store, config };
 }
 
+async function readStdin(): Promise<string> {
+  return new Promise((resolveStdin) => {
+    let data = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (chunk) => { data += chunk; });
+    process.stdin.on("end", () => resolveStdin(data));
+    process.stdin.on("error", () => resolveStdin(data));
+  });
+}
+
+async function searchFiles(pattern: string, searchPath: string, ignoreCase: boolean, extFilter?: string): Promise<Array<{ file: string; matches: Array<{ num: number; text: string }> }>> {
+  const flags = ignoreCase ? "gi" : "g";
+  const regex = new RegExp(pattern, flags);
+  const extensions = extFilter ? extFilter.split(",").map((e) => e.trim().replace(/^\./, "")) : null;
+  const results: Array<{ file: string; matches: Array<{ num: number; text: string }> }> = [];
+  const skipDirs = new Set(["node_modules", ".git", "dist", "build", ".openmythos"]);
+
+  async function walk(dir: string, depth: number): Promise<void> {
+    if (depth > 8 || results.length > 50) return;
+    let entries: string[];
+    try { entries = await readdir(dir); } catch { return; }
+    for (const entry of entries) {
+      if (skipDirs.has(entry)) continue;
+      const fullPath = resolve(dir, entry);
+      let entryStat;
+      try { entryStat = await stat(fullPath); } catch { continue; }
+      if (entryStat.isDirectory()) {
+        await walk(fullPath, depth + 1);
+      } else if (entryStat.isFile()) {
+        if (extensions) {
+          const ext = entry.split(".").pop() ?? "";
+          if (!extensions.includes(ext)) continue;
+        }
+        try {
+          const content = await readFile(fullPath, "utf8");
+          if (content.length > 500000) continue;
+          const lines = content.split("\n");
+          const fileMatches: Array<{ num: number; text: string }> = [];
+          for (let i = 0; i < lines.length && fileMatches.length < 20; i++) {
+            regex.lastIndex = 0;
+            if (regex.test(lines[i] ?? "")) {
+              fileMatches.push({ num: i + 1, text: (lines[i] ?? "").trim().slice(0, 200) });
+            }
+          }
+          if (fileMatches.length > 0) {
+            results.push({ file: fullPath, matches: fileMatches });
+          }
+        } catch { /* skip binary/unreadable */ }
+      }
+    }
+  }
+
+  await walk(searchPath, 0);
+  return results;
+}
+
+async function autoDetectCommand(workdir: string, candidates: Array<{ check: string; cmd: string; jsonCheck?: string }>): Promise<string | null> {
+  for (const candidate of candidates) {
+    const checkPath = resolve(workdir, candidate.check);
+    if (!existsSync(checkPath)) continue;
+    if (candidate.jsonCheck) {
+      try {
+        const pkg = JSON.parse(await readFile(checkPath, "utf8"));
+        if (!pkg.scripts || !pkg.scripts[candidate.jsonCheck]) continue;
+      } catch { continue; }
+    }
+    return candidate.cmd;
+  }
+  return null;
+}
 function parsePositiveInt(value: string): number {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isInteger(parsed) || parsed < 1) {
