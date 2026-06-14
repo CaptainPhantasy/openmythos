@@ -6,6 +6,7 @@ import { loadConfigWithOptionalProfile } from "../config/profile.js";
 import { resolveIssueSource } from "../core/issues.js";
 import { collectRunMetrics, summarizeBench } from "../core/metrics.js";
 import { resolvePullRequestSource } from "../core/pull-requests.js";
+import { buildReadinessReport } from "../core/readiness.js";
 import { runReview } from "../core/reviewer.js";
 import { Runner } from "../core/runner.js";
 import { StateStore } from "../state/store.js";
@@ -17,7 +18,7 @@ export function buildCli(): Command {
   program
     .name("openmythos")
     .description("Deterministic multi-model orchestration harness")
-    .version("0.18.0");
+    .version("0.19.0");
 
   program.command("run")
     .argument("<goal>", "Goal to execute")
@@ -200,6 +201,17 @@ export function buildCli(): Command {
         summary: summarizeBench(metrics),
         runs: metrics
       }, null, 2));
+    });
+
+  program.command("readiness")
+    .description("Audit real and fake evidence against the 2027 product-readiness goals")
+    .option("-w, --workdir <path>", "Repository root to audit", ".")
+    .action(async (options: { workdir: string }) => {
+      const report = await buildReadinessReport(resolve(options.workdir));
+      console.log(JSON.stringify(report, null, 2));
+      if (report.summary.unprovenCount > 0 || report.summary.missingEvidenceCount > 0) {
+        process.exitCode = 1;
+      }
     });
 
   program.command("review")

@@ -42,6 +42,8 @@ exhausted.
 - Adapter profiles for fake, Z.AI GLM coding, and frontier model experiments.
 - Retained `metrics.json` artifacts and benchmark aggregation with `bench`.
 - Consecutive-round eval command for proving harness stability.
+- Product-readiness evidence audit with `readiness`, separating real evidence
+  from fake regression coverage and missing product proof.
 - Structured tool and harness observations with status, next actions, and
   artifact references for recovery-aware execution receipts.
 - Terminal-native dashboard for inspecting run state, metrics, artifacts, and event logs.
@@ -166,6 +168,17 @@ Benchmark retained metrics:
 node dist/index.js bench --workdir .
 node dist/index.js bench --workdir runs/evals
 ```
+
+Audit product-readiness evidence:
+
+```bash
+node dist/index.js readiness --workdir .
+```
+
+`readiness` is intentionally stricter than `test` or `eval`. It reports which
+2027 product goals have real functional evidence, which are backed only by fake
+regression coverage, and which still lack proof. It exits non-zero while any
+product goal has missing evidence.
 
 Review local changes:
 

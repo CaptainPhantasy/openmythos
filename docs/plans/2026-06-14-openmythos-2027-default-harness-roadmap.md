@@ -2,324 +2,448 @@
 
 ## Purpose
 
-This document identifies where OpenMythos still falls short of being a
-developer's default daily coding harness and defines the phases required to
-close those gaps.
+This document defines the real adoption bar for OpenMythos.
 
-The target is not "a clever orchestrator." The target is a full agentic coding
-tool that a developer can trust as a primary execution surface in 2027.
+The question is not whether OpenMythos is an interesting orchestrator. The
+question is whether a developer who is already comfortable in Claude Code or
+Codex can switch to OpenMythos, use it as the default harness for daily repo
+work, feel good about the UI and control surface, and get a better outcome than
+they would have received from using Claude Code or Codex directly.
+
+That is a much higher bar than "more features" or "stronger planning."
 
 ## Current Baseline
 
-OpenMythos already has a credible deterministic core:
+OpenMythos already has a serious harness core:
 
-- Code owns the main loop: `intake -> context -> plan -> execute -> verify`.
-- Run state and artifacts are persisted to disk under `runs/`.
-- Model output is schema-validated and retried on malformed JSON.
-- Local verification commands can gate model QA.
-- There is a basic CLI, a read-only TUI, and a separate VOID-style terminal UI.
-- Z.AI / GLM and other model adapters already exist behind a common registry.
+- code owns the main loop: `intake -> context -> plan -> execute -> verify`
+- run state and artifacts persist under `runs/`
+- model output is schema-validated and retried on malformed JSON
+- patch-safe edits, review artifacts, and approval gating exist
+- governance preflight exists for dirty trees, protected branches, and
+  repository requirements
+- issue and PR ingestion exist
+- benchmark aggregation and replayable eval rounds exist
+- dependency-aware batching, bounded model tool turns, and task-scoped snippet
+  context exist
+- a terminal dashboard exists for run metrics, artifacts, and events
 
-That is a strong harness foundation. It is not yet a full default coding
-harness.
+This is a credible harness foundation. It is not yet a comfortable default
+daily coding harness.
 
-## What Still Lacks
+## The Goal That Must Be Set
 
-### 1. Execution Model Is Too Narrow
+The correct goal is:
 
-Today the harness is a linear five-role pipeline. It does not yet support:
+**A Claude Code or Codex user can move into OpenMythos without losing expected
+daily coding capability, without fighting the UI or workflow, and with measured
+improvement in verified outcomes.**
 
-- true sub-agent routing
-- concurrent task execution
-- tool-using worker turns inside a single task
-- model selection per task based on cost, latency, or difficulty
-- long-running background jobs with progress tracking
+That breaks into three gates.
 
-Implication:
-OpenMythos can run a deterministic plan, but it cannot yet behave like a strong
-multi-tool coding agent that decomposes, fans out, and converges.
+### 1. Parity Gate
 
-### 2. Action Space Is Too Coarse
+A user must be able to do normal repo work in OpenMythos without dropping back
+to Claude Code or Codex for routine actions.
 
-The current workers mainly return full-file edits plus summaries. That is not
-enough for a default harness. It still lacks:
+Required parity:
 
-- patch-level edit actions
-- structured search/read/symbol tools for workers
-- git-aware actions such as branch creation, staged diff review, and commit prep
-- browser, API, database, and package-manager tool surfaces
-- tool outputs with consistent recovery hints and next-step contracts
+- point the harness at a repository and get precise retrieval
+- execute repo work from a goal, issue, or PR
+- inspect and approve proposed edits safely
+- run shell, git, test, and verification actions in the normal task loop
+- review diffs and findings inside the harness workflow
+- resume, replay, and benchmark runs without manual artifact archaeology
 
-Implication:
-The model is still forced into large-file rewrite behavior too often, which is
-slower, riskier, and less controllable than a modern coding harness should be.
+### 2. Comfort Gate
 
-### 3. Context Building Is Still Primitive
+A user must feel comfortable operating the harness as a daily tool, not merely
+able to force work through it.
 
-Current context gathering is file-list based and pattern-biased. It does not yet
-provide:
+Required comfort:
 
-- symbol-aware indexing
-- semantic search and retrieval
-- test-impact analysis
-- dependency graph awareness
-- change-surface ranking
-- repo memory beyond per-run artifacts
+- terminal-native controls for queue, cancel, retry, approve, reject, and replay
+- diff-first views instead of JSON-first inspection
+- clear run progress, task progress, and active worker state
+- obvious recovery actions when a run fails or pauses
+- minimal setup friction for profiles, keys, and workspace binding
+- predictable commands and discoverable workflow entrypoints
 
-Implication:
-OpenMythos can gather context, but not yet with the precision and compression a
-large codebase demands.
+### 3. Superiority Gate
 
-### 4. Verification Is Not Strong Enough
+OpenMythos must beat direct Claude Code or Codex usage in ways that matter.
 
-The current verification path is "run optional local commands, then ask a model
-to judge the result." For a 2027 default harness, that is necessary but not
-sufficient. Missing layers include:
+Required superiority:
 
-- first-class lint/build/test policies
-- diff-based regression checks
-- browser and UI verification
-- contract/API validation
-- security and secret scans
-- performance and resource guards
-- explicit pass/fail gates by risk class
+- higher verified completion rate on real repo tasks
+- lower unverified or unsafe edit escape rate
+- stronger governance and approval discipline
+- better retained evidence and replayability
+- better multi-step task decomposition on larger repo work
 
-Implication:
-The harness can verify a task, but not yet at the bar where a developer trusts
-it to touch production code every day.
+If those advantages are not measurable, then OpenMythos is still an internal
+harness project, not yet a default external working surface.
 
-### 5. Human Control Surface Is Incomplete
+## Current Shortfalls Against That Goal
 
-The CLI and TUI are still inspection-first, not execution-native. Missing
-capabilities include:
+### 1. The Interaction Model Is Still Run-Centric, Not Session-Centric
 
-- interactive approval gates for risky actions
-- artifact drill-down from the TUI
-- diff preview and accept/reject workflow
-- run editing, retry selection, and phase replay
-- side-by-side model output review
-- task queueing and background run management
+The CLI surface is credible, but it still behaves more like a run engine than a
+daily coding shell. Today the primary commands are `run`, `resume`,
+`run-issue`, `run-pr`, `review`, `bench`, `status`, `inspect`, `list`, and
+`tui`.
+
+What is still missing for comfort:
+
+- an execution-native interactive session loop
+- inline approvals and edit decisions without leaving the main flow
+- cancellation, queueing, and background run management
+- task-level rerun and selective replay controls
+- a single obvious "work this repo" or "take over this issue/PR" daily-driver entrypoint
 
 Implication:
-The system is observable, but not yet ergonomic enough to replace a developer's
-main harness.
+the current flow is powerful, but it still feels like operating a harness by
+commands and artifacts rather than living inside it as a daily coding surface.
 
-### 6. Safety Model Is Not Yet Operationally Complete
+### 2. The TUI Is Still Inspection-First
 
-There is some governance and port claiming, but a default harness needs much
-more:
+The TUI exposes run lists, metrics, recent events, and artifact names. Its key
+surface is still `j/down`, `k/up`, `r refresh`, `q quit`.
 
-- branch or workspace isolation by default
-- quarantine semantics for deletions and risky rewrites
-- secret redaction in artifacts
-- policy enforcement for forbidden paths and commands
-- approval requirements by action category
-- resumable crash-safe rollback or recovery points
+What is still missing for comfort:
 
-Implication:
-The current harness is disciplined, but not yet hardened for routine autonomous
-repo work.
-
-### 7. Collaboration Features Are Thin
-
-OpenMythos does not yet act like a teammate inside real software workflows. It
-still lacks:
-
-- issue / PR / task integration
-- review mode with finding severity and code references
-- team memory and durable project notes
-- multi-run trace comparison
-- benchmark history across models and profiles
+- accept/reject approval actions
+- diff preview inside the TUI
+- artifact open/drill-down behavior
+- queue and cancellation control
+- task retry or phase replay from the dashboard
+- side-by-side comparison between competing worker outputs
 
 Implication:
-It can execute runs, but it cannot yet live comfortably inside normal
-engineering collaboration loops.
+the operator surface is informative, but not yet strong enough to replace the
+developer's main terminal harness.
 
-### 8. Operations and Benchmarking Are Still Minimal
+### 3. Worker Tooling Is Still Narrower Than Daily Expectations
 
-The harness has runs and events, but not yet full operational observability:
+OpenMythos now supports structured retrieval and bounded task tool turns, but
+the actual task tool loop is still narrow. In the current task contract,
+worker-requestable tools are limited to:
 
-- success-rate dashboards
-- pass@1 and pass@N tracking
-- cost and latency accounting
-- profile quality comparisons
-- failure taxonomy
-- replayable benchmark suites on real tasks
+- `filesystem.read`
+- `filesystem.search`
+- `code.symbols`
+- `git.status`
+- `git.diff`
+- `verification.command`
+
+What is still missing for daily-driver parity:
+
+- package-manager actions
+- shell execution as a real worker tool in the bounded loop
+- browser and UI verification tools
+- API/database interaction tools
+- git write actions such as branch creation, staging control, commit prep, and
+  PR writeback
 
 Implication:
-It is hard to prove that the harness is improving, regressing, or ready to be a
-default tool.
+the planner can decompose more intelligently than before, but the task loop
+still lacks several action families that Claude Code and Codex users already
+expect in daily repo work.
 
-## Phased Build Plan
+### 4. Execution Decomposition Is Better, But Not Yet Broad Enough
 
-### Phase 0: Harden The Existing Core
+OpenMythos can batch independent tasks, scope dependency handoffs, and route
+read-only verifier work to the harness. That is real progress.
 
-Goal:
-Turn the current deterministic runner into a safer foundation.
+What is still missing:
 
-Required steps:
+- richer worker families beyond `coder`, `critic`, and `verifier`
+- planner-directed model routing by difficulty, latency, or cost
+- long-running background jobs with intermediate progress
+- explicit sub-agent orchestration for larger tasks
+- write-capable harness-native execution families beyond verifier-style actions
 
-- add structured tool-result envelopes with `status`, `summary`, `nextActions`,
-  and `artifacts`
-- add explicit risk classes for actions and verification gates
-- add artifact redaction rules for secrets and sensitive runtime values
-- add deletion quarantine and branch-safe write modes
-- add richer failure causes and repair paths in run events
+Implication:
+the execution graph is more disciplined than a simple linear pipeline, but it
+still does not feel like a fully developed multi-worker coding system.
 
-Exit criteria:
+### 5. Verification Is Structurally Stronger, But Not Yet Broad Enough
 
-- every failure mode yields a clear retry or stop instruction
-- risky file actions can be blocked or quarantined
-- artifact logs are safe to retain locally
+OpenMythos already does better than many raw model loops because it persists
+task receipts, review bundles, governance findings, verification commands, and
+QA artifacts.
 
-### Phase 1: Expand The Action Space
+What is still missing for daily trust:
 
-Goal:
-Give the harness the tool surface expected of a serious coding agent.
+- first-class verification presets by task type
+- built-in lint/build/test policy bundles
+- browser/UI verification
+- API contract validation
+- security, dependency, and secret scanning beyond edit-risk detection
+- performance and resource guardrails
 
-Required steps:
+Implication:
+the harness can prove more than a chat-only coding tool, but it still does not
+cover enough verification ground to become the obvious daily default.
 
-- add structured read/search/symbol tools
-- add patch-level edit actions in addition to full-file rewrites
-- add first-class git actions for branch, diff, stage, and commit prep
-- add browser/API/package-manager/database tool adapters where appropriate
-- allow workers to use tools during task execution rather than only returning
-  file edits
+### 6. Git and Review Workflow Stop Short of a Full Daily Repo Assistant
 
-Exit criteria:
+The harness can ingest issues and PRs, review local diffs, summarize external PR
+checks, and retain evidence.
 
-- the harness can solve common coding tasks without relying on full-file rewrite
-  as the default move
-- tool outputs are deterministic and recovery-friendly
+What is still missing:
 
-### Phase 2: Replace Flat Context With Retrieval
+- branch creation and workspace isolation by default
+- stage/unstage control
+- commit authoring workflow inside the harness
+- PR comment or review publishing
+- merge/rebase/cherry-pick aware flows
+- rollback checkpoints for autonomous repo work
 
-Goal:
-Make context selection accurate on larger repos.
+Implication:
+OpenMythos participates in engineering workflow context, but it does not yet
+own enough of the repo lifecycle to replace a developer's normal harness.
 
-Required steps:
+### 7. Outcome Superiority Is Still Unproven
 
-- build symbol and file indices
-- add semantic retrieval over code and docs
-- add dependency and test-impact graphing
-- rank files by probable relevance instead of shallow glob priority
-- persist reusable repo memory outside individual runs
+This is the most important gap.
 
-Exit criteria:
+OpenMythos has replayable evals and retained metrics, but the evidence surface
+is still mostly:
 
-- context packs are smaller, more relevant, and reproducible
-- the harness can explain why each file was selected
+- fake-profile regression tests
+- narrow live gates
+- per-slice smoke proofs
 
-### Phase 3: Move From Linear Pipeline To Directed Execution
+What is still missing:
 
-Goal:
-Support real agentic work instead of only single-lane orchestration.
+- a maintained benchmark suite of real repo tasks
+- side-by-side baseline results versus direct Claude Code and Codex usage
+- tracked verified completion, rework rate, unsafe edit rate, and time to
+  verified completion
+- promotion gates that block claims of superiority until those numbers hold
 
-Required steps:
+Implication:
+the harness has internal proof of discipline, but it does not yet have external
+proof of better outcomes.
 
-- add task fan-out and join behavior
-- add sub-agent routing by task type
-- add planner ability to choose among tool-capable workers
-- add bounded background jobs and progress reporting
-- add model portfolio policies for cost, latency, and difficulty
+### 8. User Comfort and Onboarding Are Not Yet First-Class Features
 
-Exit criteria:
+A default harness must be easy to start using, not only powerful once fully
+configured.
 
-- a task can be decomposed into parallel or staged workers safely
-- the harness still owns orchestration and stop conditions
+What is still missing:
 
-### Phase 4: Make Verification First-Class
+- first-run onboarding for profiles and keys
+- clearer "recommended defaults" for real usage
+- friendlier explanations of why the harness chose a task, tool, or worker
+- simpler migration path for someone coming from Claude Code or Codex habits
+- a polished story for shell availability such as `npm link`, `npm exec`, or
+  repo-local invocation
 
-Goal:
-Upgrade verification from "optional local commands plus model QA" to a real
-quality gate.
+Implication:
+the current harness rewards a technical operator who already understands it; it
+does not yet welcome a daily driver who wants immediate confidence.
 
-Required steps:
+## Full Product Goal Set
 
-- define verification presets by task class
-- add lint/build/test contract runners
-- add browser and UI verification flows
-- add security, secret, and dependency scanning
-- add diff-aware regression heuristics
-- require evidence-backed completion receipts
+These are not MVP milestones, beta checkpoints, or partial stopping points.
+Each item below describes a product-complete goal state that OpenMythos must
+fully satisfy before it should claim default-harness readiness.
 
-Exit criteria:
+### Product Goal 1: OpenMythos Is A Complete Daily Work Surface
 
-- completion means verified, not merely plausible
-- high-risk tasks cannot pass on model judgment alone
+Goal state:
 
-### Phase 5: Build The Real Operator Surface
+OpenMythos is the place where a developer starts, controls, pauses, resumes,
+approves, rejects, retries, and reviews daily repository work. The harness does
+not merely expose runs; it serves as the normal operating surface for them.
 
-Goal:
-Make OpenMythos usable as the main daily harness.
+A complete implementation means:
 
-Required steps:
+- one obvious daily-driver entrypoint for repository work
+- interactive session behavior instead of run-file archaeology
+- terminal-native approval, cancellation, replay, retry, and queue control
+- diff-first and artifact-aware views rather than JSON-first inspection
+- clear worker, task, and run progress while work is active
+- predictable recovery actions when a run fails or pauses
 
-- upgrade the TUI from read-only dashboard to active run control surface
-- add diff preview and approval flows
-- add artifact navigation, search, and replay
-- add queueing, background run management, and cancellation
-- unify CLI, TUI, and VOID terminal around the same execution backend
+Completion criteria:
 
-Exit criteria:
+- a Claude Code or Codex user can operate routine repository work from the
+  OpenMythos surface without feeling pushed back into raw artifact files or
+  external harnesses
 
-- a developer can drive planning, execution, verification, and review without
-  leaving the harness for routine work
+### Product Goal 2: OpenMythos Has A Complete Execution Fabric
 
-### Phase 6: Integrate Collaboration and Memory
+Goal state:
 
-Goal:
-Make the harness operate naturally inside engineering workflows.
+OpenMythos can route real software work through the right workers and tools
+without collapsing most tasks into one generic model-edit loop.
 
-Required steps:
+A complete implementation means:
 
-- add issue / PR / task-system adapters
-- add durable repo notes and team memory
-- add code-review mode with severity-ranked findings
-- add run-to-run comparison and benchmark history
-- add knowledge capture from completed work
+- worker families richer than `coder`, `critic`, and `verifier`
+- model routing policies by task type, latency, cost, and risk
+- task execution that supports shell, package manager, git, browser, API, and
+  database actions as first-class capabilities where appropriate
+- deterministic harness-native execution families for operations that should not
+  depend on model freeform behavior
+- long-running background work with progress checkpoints
+- safe multi-worker decomposition for larger tasks
 
-Exit criteria:
+Completion criteria:
 
-- the harness behaves like a coding teammate, not just a run engine
+- larger repository tasks can be decomposed and executed through appropriate
+  worker lanes and tool families with no obvious "missing action surface"
+  compared to daily Claude Code or Codex usage
 
-### Phase 7: Prove It Under Real Workloads
+### Product Goal 3: OpenMythos Is A Complete Verification And Safety System
 
-Goal:
-Demonstrate default-harness reliability with hard evidence.
+Goal state:
 
-Required steps:
+OpenMythos does not merely propose changes and run a few commands. It verifies,
+gates, and contains software changes at a level where a developer trusts it
+with daily repository work.
 
-- build a benchmark suite of real multi-step repo tasks
-- track completion rate, retries, cost, latency, and regression rate
-- run continuous profile comparisons across supported models
-- define promotion gates for new model or tool profiles
-- publish a stable readiness score for the harness itself
+A complete implementation means:
 
-Exit criteria:
+- verification presets by task class
+- first-class lint, build, test, browser, contract, and policy verification
+- security, dependency, secret, and performance guardrails
+- branch/worktree-safe execution and rollback-aware recovery
+- approval policies by risk category
+- evidence-backed completion receipts that are stronger than model judgment
 
-- OpenMythos can be evaluated as an engineering system, not just described as
-  one
+Completion criteria:
+
+- high-risk work cannot pass on plausibility alone, and the harness provides a
+  stronger safety and verification story than direct Claude Code or Codex use
+
+### Product Goal 4: OpenMythos Owns The Full Repo Workflow
+
+Goal state:
+
+OpenMythos feels native inside engineering workflow from intake through review,
+not adjacent to it.
+
+A complete implementation means:
+
+- issue and PR intake that converge into the normal execution path
+- branch creation, staging, commit preparation, and rollback workflow support
+- review preparation and publication paths
+- durable repository memory and project notes
+- run comparison, benchmark history, and workflow traceability
+- repository isolation strong enough for autonomous work
+
+Completion criteria:
+
+- OpenMythos can own the normal repository loop from issue or PR context through
+  verified change and review-ready output
+
+### Product Goal 5: OpenMythos Is Comfortable To Adopt
+
+Goal state:
+
+OpenMythos is not only powerful after deep setup. It is understandable, easy to
+start, and migration-friendly for a developer already used to Claude Code or
+Codex.
+
+A complete implementation means:
+
+- first-run onboarding for profiles, keys, and workspace binding
+- clear recommended defaults for real usage
+- good explanations of why the harness chose a worker, tool, or action path
+- a clean shell-install and invocation story
+- discoverable workflow entrypoints that match daily coding habits
+
+Completion criteria:
+
+- a new user can adopt OpenMythos as a daily repo harness without needing deep
+  internal knowledge of the project to feel in control
+
+### Product Goal 6: OpenMythos Proves Better Outcomes Than Baseline Harnesses
+
+Goal state:
+
+OpenMythos can prove, not merely claim, that it delivers better verified
+outcomes than direct Claude Code or Codex use on the class of work it targets.
+
+A complete implementation means:
+
+- a maintained benchmark suite of real repository tasks
+- direct Claude Code and Codex baselines on those tasks
+- tracked verified completion rate, unsafe edit escape rate, rework rate, and
+  time to verified completion
+- promotion gates for harness releases and model profiles
+- replayable benchmark evidence retained with the results
+
+Completion criteria:
+
+- OpenMythos can demonstrate a measurable advantage over direct Claude Code and
+  Codex use on real repository tasks, not just richer local instrumentation
+
+## Evidence Hierarchy
+
+Fake tests and fake profiles are allowed only as regression coverage for harness
+invariants. They can prove that schemas, retries, receipts, and control-flow
+boundaries still behave deterministically. They cannot prove product readiness,
+daily-driver comfort, or superiority over Claude Code and Codex.
+
+Evidence levels:
+
+- `fake`: deterministic regression scaffolding such as `FakeAdapter`,
+  `profiles/fake.json`, and fake-run tests
+- `real`: functional local code paths, live non-fake retained runs, or real
+  repository workflow evidence
+- `comparative`: retained benchmark evidence against direct Claude Code and
+  Codex baselines
+
+The project now has a `readiness` command that audits those evidence levels
+against this roadmap:
+
+```bash
+node dist/index.js readiness --workdir .
+```
+
+The command must remain conservative. If a product goal is supported only by
+fake evidence or narrow live marker-file gates, it must report the gap instead
+of treating the goal as complete.
+
+## Completion Evidence Required
+
+OpenMythos should not be called the default 2027 harness until the repo can
+show all of the following:
+
+- a feature matrix proving daily-driver parity for repo work
+- an execution-native terminal surface with real control actions, not only
+  inspection
+- real-task benchmark results against direct Claude Code and Codex baselines
+- measurable superiority in verified outcomes, not just richer artifacts
+- repo-safe workflow coverage from intake through review preparation
+- clear onboarding and default configuration paths for real users
 
 ## Final Goal
 
 The final goal is this:
 
-OpenMythos becomes a full agentic coding tool that a developer can use as the
-default harness for daily software work in 2027.
+**OpenMythos becomes a terminal-native daily coding harness that a Claude Code
+or Codex user can adopt as their default repo workflow in 2027 without losing
+expected capability or comfort, and with a measured improvement in verified
+outcomes.**
 
 That means a developer can point it at a repository and expect it to:
 
 - understand the repo with precise retrieval instead of brute-force context
-- plan and decompose tasks into the right workers and tools
-- edit code with patch-safe, reviewable actions
-- verify changes with strong local and external evidence
+- plan and decompose work into the right workers, tools, and safety lanes
+- edit code with patch-safe, reviewable, repo-safe actions
+- verify changes with strong local, external, and risk-aware evidence
 - respect governance, secrets, branch safety, and risky-action approvals
-- expose a fast terminal-native operator surface
-- integrate with normal engineering workflows such as review, issues, and
+- operate from a fast terminal-native surface that is comfortable for daily use
+- integrate with normal engineering workflow including issues, PRs, review, and
   benchmarking
-- improve measurably over time through retained metrics and replayable evals
+- prove, with retained benchmark evidence, that it produces better verified
+  outcomes than direct Claude Code or Codex use
 
-If OpenMythos cannot do those things reliably, it is still a promising harness,
-not yet the default one.
-
+If OpenMythos cannot do those things and prove them, it is still a promising
+harness, not yet the default one.
