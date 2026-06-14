@@ -1,0 +1,24 @@
+{
+  "models": {
+    "planner": {
+      "model": "glm-5.2",
+      "maxTokens": 32768
+    },
+    "compressor": {
+      "model": "glm-5.2",
+      "maxTokens": 16384
+    },
+    "coder": {
+      "model": "glm-5.2",
+      "maxTokens": 32768
+    },
+    "critic": {
+      "model": "glm-5.2",
+      "maxTokens": 16384
+    },
+    "verifier": {
+      "model": "glm-5.2",
+      "maxTokens": 16384
+    }
+  }
+}

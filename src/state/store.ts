@@ -1,0 +1,140 @@
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+import type { Phase } from "../core/types.js";
+import type { RunEvent, RunState } from "./types.js";
+
+export class StateStore {
+  constructor(private readonly baseDir: string) {}
+
+  async createRun(runId: string, goal: string, maxRetries: number): Promise<string> {
+    const runDir = this.runDir(runId);
+    await mkdir(runDir, { recursive: true });
+    const state: RunState = {
+      runId,
+      goal,
+      status: "running",
+      currentPhase: "intake",
+      phasesCompleted: [],
+      retryCount: 0,
+      maxRetries,
+      startedAt: new Date().toISOString(),
+      completedAt: null,
+      finalOutput: null,
+      error: null
+    };
+    await this.saveState(state);
+    return runDir;
+  }
+
+  runDir(runId: string): string {
+    return resolve(this.baseDir, runId);
+  }
+
+  async loadRun(runId: string): Promise<RunState | null> {
+    const path = resolve(this.runDir(runId), "state.json");
+    if (!existsSync(path)) {
+      return null;
+    }
+    return JSON.parse(await readFile(path, "utf8")) as RunState;
+  }
+
+  async saveState(state: RunState): Promise<void> {
+    await mkdir(this.runDir(state.runId), { recursive: true });
+    await writeFile(resolve(this.runDir(state.runId), "state.json"), JSON.stringify(state, null, 2));
+  }
+
+  async updatePhase(runId: string, phase: Phase): Promise<RunState> {
+    const state = await this.mustLoad(runId);
+    state.currentPhase = phase;
+    if (!state.phasesCompleted.includes(phase)) {
+      state.phasesCompleted.push(phase);
+    }
+    await this.saveState(state);
+    return state;
+  }
+
+  async incrementRetry(runId: string): Promise<RunState> {
+    const state = await this.mustLoad(runId);
+    state.retryCount += 1;
+    await this.saveState(state);
+    return state;
+  }
+
+  async complete(runId: string, finalOutput: string): Promise<RunState> {
+    const state = await this.mustLoad(runId);
+    state.status = "completed";
+    state.currentPhase = "complete";
+    if (!state.phasesCompleted.includes("complete")) {
+      state.phasesCompleted.push("complete");
+    }
+    state.completedAt = new Date().toISOString();
+    state.finalOutput = finalOutput;
+    await this.saveState(state);
+    return state;
+  }
+
+  async fail(runId: string, error: string): Promise<RunState> {
+    const state = await this.mustLoad(runId);
+    state.status = "failed";
+    state.completedAt = new Date().toISOString();
+    state.error = error;
+    await this.saveState(state);
+    return state;
+  }
+
+  async emit(runId: string, event: Omit<RunEvent, "timestamp">): Promise<void> {
+    const line = JSON.stringify({ ...event, timestamp: new Date().toISOString() });
+    await writeFile(resolve(this.runDir(runId), "events.jsonl"), `${line}\n`, { flag: "a" });
+  }
+
+  async loadEvents(runId: string): Promise<RunEvent[]> {
+    const path = resolve(this.runDir(runId), "events.jsonl");
+    if (!existsSync(path)) {
+      return [];
+    }
+    const text = await readFile(path, "utf8");
+    return text.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as RunEvent);
+  }
+
+  async writeArtifact(runId: string, name: string, value: unknown): Promise<string> {
+    const path = resolve(this.runDir(runId), name);
+    const content = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+    await writeFile(path, content);
+    return path;
+  }
+
+  async readArtifact<T>(runId: string, name: string): Promise<T | null> {
+    const path = resolve(this.runDir(runId), name);
+    if (!existsSync(path)) {
+      return null;
+    }
+    return JSON.parse(await readFile(path, "utf8")) as T;
+  }
+
+  async listRuns(): Promise<RunState[]> {
+    if (!existsSync(this.baseDir)) {
+      return [];
+    }
+    const entries = await readdir(this.baseDir, { withFileTypes: true });
+    const states: RunState[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+      const state = await this.loadRun(entry.name);
+      if (state) {
+        states.push(state);
+      }
+    }
+    return states.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  }
+
+  private async mustLoad(runId: string): Promise<RunState> {
+    const state = await this.loadRun(runId);
+    if (!state) {
+      throw new Error(`Run not found: ${runId}`);
+    }
+    return state;
+  }
+}

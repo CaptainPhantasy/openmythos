@@ -1,0 +1,29 @@
+{
+  "name": "openmythos",
+  "version": "0.1.0",
+  "description": "Deterministic multi-model orchestration harness where code owns the loop.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "openmythos": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test dist/test/*.test.js",
+    "check": "npm run build && npm test",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.7",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.20.5",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

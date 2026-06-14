@@ -1,0 +1,35 @@
+{
+  "models": {
+    "planner": {
+      "adapter": "fake",
+      "model": "fake-openmythos"
+    },
+    "compressor": {
+      "adapter": "fake",
+      "model": "fake-openmythos"
+    },
+    "coder": {
+      "adapter": "fake",
+      "model": "fake-openmythos"
+    },
+    "critic": {
+      "adapter": "fake",
+      "model": "fake-openmythos"
+    },
+    "verifier": {
+      "adapter": "fake",
+      "model": "fake-openmythos"
+    }
+  },
+  "execution": {
+    "maxRetries": 1,
+    "timeoutMs": 30000
+  },
+  "verification": {
+    "localCommands": [
+      "test -f openmythos-fake-output.txt",
+      "grep -q OPENMYTHOS_FAKE_SUCCESS openmythos-fake-output.txt"
+    ],
+    "requireLocalPassBeforeModelQa": true
+  }
+}

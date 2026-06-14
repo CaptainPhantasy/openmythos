@@ -1,0 +1,60 @@
+{
+  "models": {
+    "planner": {
+      "adapter": "zai-coding",
+      "model": "glm-5.1",
+      "maxTokens": 4096,
+      "temperature": 0.1,
+      "rateLimit": {
+        "requestsPerMinute": 10
+      }
+    },
+    "compressor": {
+      "adapter": "zai-coding",
+      "model": "glm-5.1",
+      "maxTokens": 2048,
+      "temperature": 0.1,
+      "rateLimit": {
+        "requestsPerMinute": 10
+      }
+    },
+    "coder": {
+      "adapter": "zai-coding",
+      "model": "glm-5.1",
+      "maxTokens": 4096,
+      "temperature": 0.1,
+      "rateLimit": {
+        "requestsPerMinute": 10
+      }
+    },
+    "critic": {
+      "adapter": "zai-coding",
+      "model": "glm-5.1",
+      "maxTokens": 4096,
+      "temperature": 0.1,
+      "rateLimit": {
+        "requestsPerMinute": 10
+      }
+    },
+    "verifier": {
+      "adapter": "zai-coding",
+      "model": "glm-5.1",
+      "maxTokens": 2048,
+      "temperature": 0.1,
+      "rateLimit": {
+        "requestsPerMinute": 10
+      }
+    }
+  },
+  "execution": {
+    "maxRetries": 1,
+    "timeoutMs": 120000
+  },
+  "verification": {
+    "localCommands": [
+      "test -f openmythos-live-output.txt",
+      "grep -q OPENMYTHOS_LIVE_SUCCESS openmythos-live-output.txt"
+    ],
+    "requireLocalPassBeforeModelQa": true
+  }
+}
