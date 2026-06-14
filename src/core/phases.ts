@@ -28,6 +28,8 @@ import {
   summarizeToolValidationIssues
 } from "./tooling.js";
 import { buildExecutionBatches } from "./toposort.js";
+import { scanForSecrets, summarizeRisk, type SecurityFinding } from "./guardrails.js";
+import { routeModel, defaultRoutingPolicies, classifyComplexity, classifyRisk } from "./model-routing.js";
 import type { AdapterMessage, AdapterRequest, CommandReceipt, ContextResult, IntakeResult, Plan, PlanTask, QaResult, ReviewBundle, TaskExecutionReceipt, TaskObservation, TaskOutput, TaskStepResult, TaskToolRequest } from "./types.js";
 import type { ModelUsageMetric } from "../state/types.js";
 
@@ -105,7 +107,7 @@ export class PhaseExecutor {
     let planned = await this.callJson("planner", "plan", buildPlanRequest(), planSchema) as Plan;
     let normalized = normalizePlanTools(planned);
     if (normalized.issues.length === 0) {
-      return normalized.plan;
+      return this.applyRouting(normalized.plan, intake);
     }
 
     const toolRepairNotes = summarizeToolValidationIssues(normalized.issues);
@@ -115,12 +117,12 @@ export class PhaseExecutor {
       const roleRepairedPlan = this.repairHarnessTaskRoles(normalized.plan);
       const roleRepairedNormalized = normalizePlanTools(roleRepairedPlan);
       if (roleRepairedNormalized.issues.length === 0) {
-        return roleRepairedNormalized.plan;
+        return this.applyRouting(roleRepairedNormalized.plan, intake);
       }
       throw new Error(`Plan referenced unsupported or mismatched tools after repair:\n${summarizeToolValidationIssues(normalized.issues)}`);
     }
 
-    return normalized.plan;
+    return this.applyRouting(normalized.plan, intake);
   }
 
   private repairHarnessTaskRoles(plan: Plan): Plan {
@@ -132,6 +134,21 @@ export class PhaseExecutor {
       ...plan,
       tasks: repairedTasks
     };
+  }
+
+  private applyRouting(plan: Plan, intake: IntakeResult): Plan {
+    const policies = defaultRoutingPolicies();
+    const routedTasks = plan.tasks.map((task) => {
+      if (task.executor === "harness") return task;
+      const complexity = classifyComplexity(task.description, task.fileTargets.length, task.acceptanceCriteria.length * 20);
+      const riskLevel = classifyRisk(task.fileTargets.length, false, false);
+      const decision = routeModel(
+        { type: intake.taskType, complexity, riskLevel, requiresTools: task.requiredTools.length > 0 },
+        policies
+      );
+      return { ...task, routing: { taskType: intake.taskType, complexity, riskLevel, routedRole: decision.role, routingReason: decision.reason } };
+    });
+    return { ...plan, tasks: routedTasks };
   }
 
   async execute(plan: Plan, context: ContextResult, intake?: IntakeResult, bypassReviewBlocking = false): Promise<TaskOutput[]> {
@@ -241,6 +258,33 @@ export class PhaseExecutor {
       } catch (error) {
         fileState[file] = `[read failed: ${(error as Error).message}]`;
       }
+    }
+
+    const guardrailFindings: SecurityFinding[] = [];
+    if (this.config.guardrails?.secretScan !== false) {
+      for (const file of changedFiles) {
+        const content = fileState[file];
+        if (content && !content.startsWith("[read failed:")) {
+          guardrailFindings.push(...scanForSecrets(content, file));
+        }
+      }
+    }
+    const guardrailSummary = summarizeRisk(guardrailFindings);
+    if (guardrailSummary.level === "dangerous") {
+      return {
+        passed: false,
+        score: 0,
+        issues: guardrailFindings.map((f) => ({
+          severity: "critical" as const,
+          description: `[${f.type}] ${f.description} in ${f.file}${f.line ? `:${f.line}` : ""} — ${f.recommendation}`,
+          file: f.file,
+          line: f.line,
+          suggestedFix: f.recommendation,
+        })),
+        suggestions: ["Remove hardcoded secrets before proceeding. Use environment variables or a secrets manager."],
+        verifiedCriteria: [],
+        failedCriteria: plan.successCriteria,
+      };
     }
 
     const model = this.config.models.verifier;

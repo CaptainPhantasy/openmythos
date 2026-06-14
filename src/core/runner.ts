@@ -9,6 +9,8 @@ import { PhaseExecutor } from "./phases.js";
 import { evaluateGovernance, GovernanceViolationError } from "./governance.js";
 import { ApprovalRequiredError, ToolApprovalRequiredError } from "./review.js";
 import { buildRunMetrics } from "./metrics.js";
+import { createWorktree, cleanupWorktree, type WorktreeHandle } from "./worktree.js";
+import { addNote, addDecision } from "./memory.js";
 import type { ContextResult, IntakeResult, IssueContext, Plan, PullRequestContext, PullRequestVerification, QaResult, TaskOutput } from "./types.js";
 
 export interface RunResult {
@@ -149,7 +151,15 @@ export class Runner {
     bypassReviewBlocking = false
   ): Promise<RunResult> {
     const runDir = this.store.runDir(runId);
-    const executor = new PhaseExecutor(this.config, new AdapterRegistry(this.config), this.workdir, runDir);
+    let worktreeHandle: WorktreeHandle | null = null;
+    let execWorkdir = this.workdir;
+    if (this.config.worktree?.enabled) {
+      worktreeHandle = await createWorktree(this.workdir);
+      if (worktreeHandle.isolated) {
+        execWorkdir = worktreeHandle.path;
+      }
+    }
+    const executor = new PhaseExecutor(this.config, new AdapterRegistry(this.config), execWorkdir, runDir);
     const started = Date.now();
 
     let intake = await this.store.readArtifact<IntakeResult>(runId, "intake.json");
@@ -255,6 +265,12 @@ export class Runner {
       await this.store.writeArtifact(runId, "final.md", finalOutput);
       await this.store.complete(runId, finalOutput);
       await this.writeMetrics(runId, executor, context, plan, outputs, qa);
+      if (this.config.memory?.enabled !== false) {
+        await addNote(this.workdir, `Run ${runId}: ${goal}`, ["run"]).catch(() => {});
+      }
+      if (worktreeHandle?.isolated) {
+        await cleanupWorktree(worktreeHandle).catch(() => {});
+      }
       return {
         runId,
         status: "completed",
@@ -315,6 +331,9 @@ export class Runner {
       await this.store.fail(runId, (error as Error).message);
       await this.event(runId, (await this.store.loadRun(runId))?.currentPhase ?? "intake", "run_failed", "error", "Run failed", [], Date.now() - started, (error as Error).message);
       await this.writeMetrics(runId, executor, context, plan, outputs, qa);
+      if (worktreeHandle?.isolated) {
+        await cleanupWorktree(worktreeHandle).catch(() => {});
+      }
       throw error;
     }
   }
