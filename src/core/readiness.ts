@@ -102,7 +102,7 @@ async function detectFakeSurface(repoRoot: string): Promise<FakeSurfaceReport> {
 
 async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalSummary[]): Promise<ProductGoalAssessment[]> {
   const types = await readOptional(resolve(repoRoot, "src/core/types.ts"));
-  const commandEvidence = evidence("cli.commands", "real", "CLI exposes run, issue, PR, review, bench, eval, and TUI commands.", ["src/ui/cli.ts"], []);
+  const commandEvidence = evidence("cli.commands", "real", "CLI exposes run, issue, PR, review, bench, eval, real-eval, and TUI commands.", ["src/ui/cli.ts"], []);
   const tuiInspectionEvidence = evidence("tui.inspect", "real", "TUI renders run lists, metrics, artifacts, and recent events.", ["src/ui/tui.ts"], []);
   const missingTuiControls = evidence("tui.controls.missing", "missing", "TUI does not expose approval, reject, cancel, queue, or replay actions.", ["src/ui/tui.ts"], ["Add execution-native TUI controls for approval, cancellation, queueing, retry, and replay."]);
 
@@ -120,6 +120,26 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
       ["Treat this as a narrow adapter/harness gate, not full product proof."]
     )
     : evidence("live.zai.marker_gate.missing", "missing", "No passed live non-fake eval summary was found under runs/live-evals.", ["runs/live-evals"], ["Run a retained live eval with a non-fake profile."]);
+  const realEvalSummaries = await collectRealEvalSummaries(repoRoot);
+  const strongestRealEval = realEvalSummaries.find((summary) => summary.passed) ?? null;
+  const realEvalWorkflowEvidence = existingRelative(repoRoot, "src/core/real-eval.ts") && existingRelative(repoRoot, "fixtures/real-eval/noop-js/manifest.json")
+    ? evidence(
+      "real.eval.workflow",
+      "real",
+      "Fixture-backed real-eval workflow exists with retained repository-local verification and expected-file checks.",
+      ["src/core/real-eval.ts", "src/ui/cli.ts", "fixtures/real-eval/noop-js/manifest.json"],
+      ["Run retained non-fake real-eval rounds and store the results under runs/real-evals."]
+    )
+    : null;
+  const realEvalResultEvidence = strongestRealEval
+    ? evidence(
+      "real.eval.result",
+      "real",
+      `Real fixture-backed eval ${strongestRealEval.fixture} passed ${strongestRealEval.successfulConsecutiveRounds}/${strongestRealEval.requiredConsecutiveRounds} consecutive rounds.`,
+      [strongestRealEval.path],
+      ["Add direct Claude Code and Codex baseline artifacts for this same fixture."]
+    )
+    : null;
 
   return [
     goal(
@@ -184,7 +204,7 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
     goal(
       "outcome-superiority",
       "OpenMythos Proves Better Outcomes Than Baseline Harnesses",
-      liveGate ? [liveGateEvidence] : [],
+      [liveGate ? liveGateEvidence : null, realEvalWorkflowEvidence, realEvalResultEvidence].filter((item): item is EvidenceItem => Boolean(item)),
       [
         evidence("fake.regressions", "fake", "Fake adapter, fake profile, and fake-run tests cover harness invariants only.", ["src/adapters/fake.ts", "profiles/fake.json", "src/test/fake-run.test.ts"], ["Keep fake coverage as regression-only evidence."])
       ],
@@ -229,6 +249,37 @@ async function collectLiveEvalSummaries(repoRoot: string): Promise<LiveEvalSumma
   return (await collectEvalSummaries(repoRoot))
     .filter((summary) => summary.profile !== "fake")
     .sort((a, b) => b.successfulConsecutiveRounds - a.successfulConsecutiveRounds);
+}
+
+async function collectRealEvalSummaries(repoRoot: string): Promise<Array<LiveEvalSummary & { fixture: string }>> {
+  const summaries = await findFiles(resolve(repoRoot, "runs/real-evals"), "summary.json", 8);
+  const parsed: Array<LiveEvalSummary & { fixture: string }> = [];
+  for (const summaryPath of summaries) {
+    try {
+      const raw = JSON.parse(await readFile(summaryPath, "utf8")) as {
+        evidenceLevel?: unknown;
+        profile?: unknown;
+        fixture?: unknown;
+        passed?: unknown;
+        requiredConsecutiveRounds?: unknown;
+        successfulConsecutiveRounds?: unknown;
+      };
+      if (raw.evidenceLevel !== "real") {
+        continue;
+      }
+      parsed.push({
+        path: relative(repoRoot, summaryPath),
+        profile: typeof raw.profile === "string" ? raw.profile : "unknown",
+        fixture: typeof raw.fixture === "string" ? raw.fixture : "unknown",
+        passed: raw.passed === true,
+        requiredConsecutiveRounds: typeof raw.requiredConsecutiveRounds === "number" ? raw.requiredConsecutiveRounds : 0,
+        successfulConsecutiveRounds: typeof raw.successfulConsecutiveRounds === "number" ? raw.successfulConsecutiveRounds : 0
+      });
+    } catch {
+      continue;
+    }
+  }
+  return parsed.sort((a, b) => b.successfulConsecutiveRounds - a.successfulConsecutiveRounds);
 }
 
 async function collectEvalSummaries(repoRoot: string): Promise<LiveEvalSummary[]> {

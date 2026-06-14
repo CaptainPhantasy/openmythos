@@ -6,7 +6,7 @@ Replace fake-product claims with real verification paths so OpenMythos can only 
 
 ## Current Phase
 
-Phase 1
+Phase 2
 
 ## Phases
 
@@ -20,11 +20,12 @@ Phase 1
 
 ### Phase 2: Real Benchmark Harness
 
-- [ ] Define a retained artifact schema for real repo tasks, baseline runs, and scoring.
-- [ ] Add fixture repositories or reproducible repo snapshots that require real code edits, tests, and review.
-- [ ] Ensure benchmark tasks cannot pass by writing marker files or only exercising fake adapters.
-- [ ] Add a command that runs the real benchmark suite and stores receipts under a real-evidence path.
-- **Status:** pending
+- [x] Add an outcome-superiority evidence-shape regression guard so raw summary objects cannot be promoted as real evidence.
+- [x] Define a retained artifact schema for real repo task suites, runs, and score fields.
+- [x] Add fixture repositories or reproducible repo snapshots that require real code edits and tests.
+- [x] Keep benchmark evidence in retained fixture/suite artifacts and require non-fake profiles.
+- [x] Add a command that runs the real benchmark suite and stores receipts under a real-evidence path.
+- **Status:** complete
 
 ### Phase 3: Replace Narrow Live Gates With Real Repo Tasks
 

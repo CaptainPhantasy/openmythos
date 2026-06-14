@@ -106,3 +106,28 @@ test("normalizePlanTools rejects harness actions that do not match allowed tools
   const normalized = normalizePlanTools(plan);
   assert.ok(normalized.issues.some((issue) => issue.reason === "action_mismatch" && issue.tool === "git.status"));
 });
+
+test("normalizePlanTools tolerates empty verificationCommands for harness verifier tasks", () => {
+  const plan: Plan = {
+    goal: "Verifier harness with no checks",
+    dependencies: {},
+    successCriteria: ["done"],
+    tasks: [{
+      id: "task-1",
+      title: "Verify state",
+      description: "Run verifier checks",
+      role: "verifier",
+      executor: "harness",
+      harnessAction: "verify.git_status",
+      contextQueries: [],
+      fileTargets: [],
+      acceptanceCriteria: ["done"],
+      requiredTools: ["git.status"],
+      verificationCommands: [],
+      executionMode: "serial"
+    }]
+  };
+
+  const normalized = normalizePlanTools(plan);
+  assert.equal(normalized.issues.length, 0);
+});

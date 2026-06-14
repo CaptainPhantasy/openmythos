@@ -135,7 +135,35 @@ export const planTaskSchema = z.object({
   acceptanceCriteria: stringListSchema.refine((items) => items.length > 0, "Expected at least one acceptance criterion"),
   requiredTools: stringListSchema.default([]),
   verificationCommands: stringListSchema.default([]),
-  executionMode: z.enum(["parallel", "serial"]).default("serial")
+  executionMode: z.preprocess((value) => {
+    if (typeof value !== "string") {
+      return value;
+    }
+    const mode = value.toLowerCase();
+    if (
+      mode === "parallel" ||
+      mode === "serial" ||
+      mode.includes("parallel")
+    ) {
+      return "parallel";
+    }
+    if (
+      mode.includes("synchronous") ||
+      mode.includes("deterministic") ||
+      mode === "read-only" ||
+      mode === "readonly" ||
+      mode.includes("write") ||
+      mode.includes("verify") ||
+      mode.includes("edit") ||
+      mode.includes("review") ||
+      mode === "direct" ||
+      mode === "synchron" ||
+      mode === "serial"
+    ) {
+      return "serial";
+    }
+    return "serial";
+  }, z.enum(["parallel", "serial"]).default("serial"))
 });
 
 export const planSchema = z.object({
@@ -160,7 +188,16 @@ export const fileEditSchema = z.object({
 });
 
 export const taskToolRequestSchema = z.object({
-  tool: z.enum(["filesystem.read", "filesystem.search", "code.symbols", "git.status", "git.diff", "verification.command"]),
+  tool: z.preprocess((value) => {
+    if (typeof value === "string") {
+      const normalized = value.toLowerCase();
+      if (normalized === "shell.run" || normalized === "shell.exec" || normalized === "shell_execute") {
+        return "verification.command";
+      }
+      return normalized;
+    }
+    return value;
+  }, z.enum(["filesystem.read", "filesystem.search", "code.symbols", "git.status", "git.diff", "verification.command"])),
   input: z.object({
     query: z.string().optional(),
     paths: stringListSchema.optional(),

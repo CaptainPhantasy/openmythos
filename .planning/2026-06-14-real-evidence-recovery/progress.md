@@ -21,11 +21,29 @@
 
 ### Phase 2: Real Benchmark Harness
 
-- **Status:** pending
+- **Status:** complete
 - Actions taken:
-  -
+  - Added a schema-driven real benchmark suite manifest and command path under `fixtures/real-eval`.
+  - Added a second benchmark fixture (`trim-js`) and suite orchestrator (`daily-workflow-suite`) requiring real repository edits.
+  - Added suite-mode real-eval execution via `real-benchmark` with retained suite-level scoring receipts.
+  - Enforced a non-fake profile requirement in the real benchmark path and preserved artifact-level scoring in receipts.
 - Files created/modified:
-  -
+  - `.planning/2026-06-14-real-evidence-recovery/task_plan.md`
+  - `.planning/2026-06-14-real-evidence-recovery/progress.md`
+  - `src/core/real-eval.ts`
+  - `src/test/readiness.test.ts`
+  - `src/test/real-eval.test.ts`
+  - `src/ui/cli.ts`
+  - `README.md`
+  - `fixtures/real-eval/noop-js/...`
+  - `fixtures/real-eval/trim-js/...`
+  - `fixtures/real-eval/suites/daily-workflow-suite.json`
+
+### Readiness Evidence Hardening
+
+- **Status:** complete
+- Added: `src/test/readiness.test.ts`
+- Evidence: explicit shape guard now prevents raw `LiveEvalSummary` objects from entering `outcome-superiority.realEvidence` in tests.
 
 ## Test Results
 
@@ -45,7 +63,7 @@
 
 | Question | Answer |
 |----------|--------|
-| Where am I? | Phase 1 is complete; Phase 2 is the next implementation phase. |
+| Where am I? | Phase 1 is complete and Phase 2 is complete. |
 | Where am I going? | Build real benchmark evidence, replace marker-file gates with real repo tasks, expand real worker actions, and enforce product readiness gates. |
 | What's the goal? | Replace fake-product claims with real verification paths so OpenMythos advances only through functional code, retained real-run evidence, and comparative benchmarks. |
 | What have I learned? | Fake tests are useful only for regression; product support requires real or comparative evidence. |

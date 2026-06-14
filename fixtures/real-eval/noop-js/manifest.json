@@ -1,0 +1,19 @@
+{
+  "id": "noop-js",
+  "name": "Noop JS return fix",
+  "description": "Fix a small JavaScript helper in a real repository fixture and prove the change with repository-local tests.",
+  "goal": "Fix src/noop.js so echoOrFallback returns the provided non-empty string and returns \"fallback\" only when the input is blank. Do not create marker files or unrelated outputs. Keep tests passing.",
+  "verificationCommands": [
+    "npm test"
+  ],
+  "expectedChangedFiles": [
+    "src/noop.js"
+  ],
+  "prohibitedArtifacts": [
+    "openmythos-fake-output.txt",
+    "alpha-report.txt",
+    "alpha.txt",
+    "beta.txt",
+    "handoff-report.txt"
+  ]
+}

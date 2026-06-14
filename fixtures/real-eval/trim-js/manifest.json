@@ -1,0 +1,18 @@
+{
+  "id": "trim-js",
+  "name": "Trim utility normalization",
+  "description": "Fix utility behavior so trimOrEmpty normalizes each item and keeps empty values expected by callers.",
+  "goal": "Fix src/trim.js so trimOrEmpty trims every item and only converts null/undefined values to empty strings without mutating number inputs.",
+  "verificationCommands": [
+    "npm test"
+  ],
+  "expectedChangedFiles": [
+    "src/trim.js"
+  ],
+  "prohibitedArtifacts": [
+    "alpha-report.txt",
+    "beta.txt",
+    "handoff-report.txt",
+    "openmythos-fake-output.txt"
+  ]
+}

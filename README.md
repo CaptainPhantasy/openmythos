@@ -151,6 +151,29 @@ node dist/index.js eval \
   --goal "Create exactly one file named openmythos-live-output.txt whose complete content is OPENMYTHOS_LIVE_SUCCESS followed by a newline. Do not modify any other files."
 ```
 
+Run the retained real repository fixture eval:
+
+```bash
+node dist/index.js real-eval \
+  --profile zai-live-gate \
+  --fixture noop-js \
+  --workdir runs/real-evals
+```
+
+Run the retained real benchmark suite:
+
+```bash
+node dist/index.js real-benchmark \
+  --profile zai-live-gate \
+  --suite daily-workflow-suite \
+  --workdir runs/real-evals
+```
+
+`real-eval` refuses fake profiles. It copies a retained fixture repository,
+initializes git history, runs the harness against a real bug-fix task, and then
+proves the result with repository-local verification commands plus expected-file
+and prohibited-artifact checks.
+
 Inspect runs:
 
 ```bash

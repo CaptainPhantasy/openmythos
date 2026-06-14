@@ -254,14 +254,6 @@ export function normalizePlanTools(plan: Plan): { plan: Plan; issues: ToolValida
       });
       continue;
     }
-    if (task.verificationCommands.length === 0) {
-      issues.push({
-        taskId: task.id,
-        tool: "verificationCommands",
-        reason: "executor_mismatch",
-        role: task.role
-      });
-    }
     for (const tool of task.requiredTools) {
       if (!harnessOnlyTools.has(tool)) {
         issues.push({

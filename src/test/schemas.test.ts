@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { contextSchema, intakeSchema, planSchema, qaSchema, taskOutputSchema } from "../core/schemas.js";
+import { contextSchema, intakeSchema, planSchema, qaSchema, taskOutputSchema, taskStepSchema } from "../core/schemas.js";
 
 test("schemas normalize single string list fields from live model output", () => {
   const intake = intakeSchema.parse({
@@ -72,6 +72,73 @@ test("schemas normalize single string list fields from live model output", () =>
   assert.equal(firstTask.executionMode, "parallel");
   assert.deepEqual(plan.dependencies["task-1"], ["task-0"]);
   assert.deepEqual(plan.successCriteria, ["file has exact marker"]);
+  assert.equal(plan.tasks[0]?.executionMode, "parallel");
+
+  const normalizedDeterministicPlan = planSchema.parse({
+    goal: "Normalize deterministic mode",
+    tasks: [{
+      id: "task-1",
+      title: "Create marker",
+      description: "Create marker file",
+      role: "coder",
+      executor: "model",
+      harnessAction: null,
+      contextQueries: [],
+      fileTargets: [],
+      acceptanceCriteria: ["file has marker"],
+      requiredTools: [],
+      verificationCommands: ["test -f openmythos-live-output.txt"],
+      executionMode: "deterministic"
+    }],
+    dependencies: {},
+    successCriteria: ["file has marker"]
+  });
+  assert.equal(normalizedDeterministicPlan.tasks[0]?.executionMode, "serial");
+
+  const normalizedSynchronousPlan = planSchema.parse({
+    goal: "Normalize synchronous mode",
+    tasks: [{
+      id: "task-1",
+      title: "Create marker",
+      description: "Create marker file",
+      role: "coder",
+      executor: "model",
+      harnessAction: null,
+      contextQueries: [],
+      fileTargets: [],
+      acceptanceCriteria: ["file has marker"],
+      requiredTools: [],
+      verificationCommands: ["test -f openmythos-live-output.txt"],
+      executionMode: "synchronous"
+    }],
+    dependencies: {},
+    successCriteria: ["file has marker"]
+  });
+  assert.equal(normalizedSynchronousPlan.tasks[0]?.executionMode, "serial");
+
+  const normalizedLegacyModes = ["read-only", "write", "verify", "readonly", "edit", "review", "direct"];
+  for (const mode of normalizedLegacyModes) {
+    const normalizedPlan = planSchema.parse({
+      goal: `Normalize ${mode} mode`,
+      tasks: [{
+        id: "task-1",
+        title: "Create marker",
+        description: "Create marker file",
+        role: "coder",
+        executor: "model",
+        harnessAction: null,
+        contextQueries: [],
+        fileTargets: [],
+        acceptanceCriteria: ["file has marker"],
+        requiredTools: [],
+        verificationCommands: ["test -f openmythos-live-output.txt"],
+        executionMode: mode
+      }],
+      dependencies: {},
+      successCriteria: ["file has marker"]
+    });
+    assert.equal(normalizedPlan.tasks[0]?.executionMode, "serial");
+  }
 
   const output = taskOutputSchema.parse({
     taskId: "task-1",
@@ -106,4 +173,18 @@ test("schemas normalize single string list fields from live model output", () =>
   });
   assert.deepEqual(qa.suggestions, ["none"]);
   assert.deepEqual(qa.verifiedCriteria, ["file has exact marker"]);
+
+  const toolStep = taskStepSchema.parse({
+    taskId: "task-1",
+    status: "tool",
+    summary: "Need to run a verification command",
+    toolRequests: [{
+      tool: "shell.run",
+      input: {
+        command: "test -f openmythos-live-output.txt"
+      }
+    }]
+  });
+  assert.equal(toolStep.toolRequests[0]?.tool, "verification.command");
+  assert.equal(toolStep.toolRequests[0]?.input.command, "test -f openmythos-live-output.txt");
 });

@@ -7,6 +7,7 @@ import { resolveIssueSource } from "../core/issues.js";
 import { collectRunMetrics, summarizeBench } from "../core/metrics.js";
 import { resolvePullRequestSource } from "../core/pull-requests.js";
 import { buildReadinessReport } from "../core/readiness.js";
+import { assessRealEvalFixture, copyRealEvalFixture, initializeRealEvalRepository, loadRealEvalFixture, loadRealEvalSuite, usesFakeAdapter, type RealEvalFixture } from "../core/real-eval.js";
 import { runReview } from "../core/reviewer.js";
 import { Runner } from "../core/runner.js";
 import { StateStore } from "../state/store.js";
@@ -18,7 +19,7 @@ export function buildCli(): Command {
   program
     .name("openmythos")
     .description("Deterministic multi-model orchestration harness")
-    .version("0.19.0");
+    .version("0.20.0");
 
   program.command("run")
     .argument("<goal>", "Goal to execute")
@@ -150,6 +151,122 @@ export function buildCli(): Command {
         profile: options.profile,
         evalRoot,
         results
+      };
+      await writeFile(resolve(evalRoot, "summary.json"), JSON.stringify(summary, null, 2));
+      console.log(JSON.stringify(summary, null, 2));
+      if (!passed) {
+        process.exitCode = 1;
+      }
+    });
+
+  program.command("real-eval")
+    .description("Run retained real repository benchmark rounds against a fixture repo")
+    .option("-c, --config <path>", "Config file", "openmythos.config.json")
+    .option("-p, --profile <nameOrPath>", "Config profile overlay")
+    .option("-f, --fixture <id>", "Real eval fixture id", "noop-js")
+    .option("-r, --rounds <n>", "Consecutive rounds required", parsePositiveInt, 1)
+    .option("-w, --workdir <path>", "Real evaluation output directory", "runs/real-evals")
+    .option("-g, --goal <goal>", "Override the fixture goal")
+    .action(async (options: { config: string; profile?: string; fixture: string; rounds: number; workdir: string; goal?: string }) => {
+      const fixture = await loadRealEvalFixture(options.fixture);
+      const evalRoot = resolve(options.workdir, `eval-${new Date().toISOString().replace(/[:.]/g, "-")}`);
+      await mkdir(evalRoot, { recursive: true });
+      const startedAt = new Date().toISOString();
+      const results = await runRealEvalFixtureSuite({
+        fixture,
+        rounds: options.rounds,
+        goal: options.goal ?? fixture.goal,
+        profileConfigPath: options.config,
+        profile: options.profile,
+        baseDir: evalRoot
+      });
+      const passed = results.passed;
+      const summary = {
+        schemaVersion: "real-eval.v1",
+        evidenceLevel: "real",
+        passed,
+        requiredConsecutiveRounds: options.rounds,
+        successfulConsecutiveRounds: results.successfulConsecutiveRounds,
+        profile: options.profile ?? null,
+        fixture: fixture.id,
+        goal: results.goal,
+        evalRoot,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        mode: "fixture",
+        scoring: {
+          requestedRounds: options.rounds,
+          completedRounds: results.rounds.length,
+          passedRounds: results.rounds.filter((round) => round.passed).length
+        },
+        results: results.rounds
+      };
+      await writeFile(resolve(evalRoot, "summary.json"), JSON.stringify(summary, null, 2));
+      console.log(JSON.stringify(summary, null, 2));
+      if (!passed) {
+        process.exitCode = 1;
+      }
+    });
+
+  program.command("real-benchmark")
+    .description("Run a retained benchmark suite across multiple real-eval fixtures")
+    .option("-c, --config <path>", "Config file", "openmythos.config.json")
+    .option("-p, --profile <nameOrPath>", "Config profile overlay")
+    .option("-s, --suite <id>", "Real eval suite id", "daily-workflow-suite")
+    .option("-w, --workdir <path>", "Real evaluation output directory", "runs/real-evals")
+    .action(async (options: { config: string; profile?: string; suite: string; workdir: string }) => {
+      const startedAt = new Date().toISOString();
+      const suite = await loadRealEvalSuite(options.suite);
+      const evalRoot = resolve(options.workdir, `suite-${new Date().toISOString().replace(/[:.]/g, "-")}`);
+      await mkdir(evalRoot, { recursive: true });
+      await writeFile(resolve(evalRoot, "suite.json"), JSON.stringify(suite, null, 2));
+
+      const fixtureResults = [];
+      for (const fixtureSpec of suite.fixtures) {
+        const fixture = await loadRealEvalFixture(fixtureSpec.id);
+        const result = await runRealEvalFixtureSuite({
+          fixture,
+          rounds: fixtureSpec.rounds,
+          goal: fixtureSpec.goal ?? fixture.goal,
+          profileConfigPath: options.config,
+          profile: options.profile,
+          baseDir: resolve(evalRoot, `fixture-${fixture.id}`)
+        });
+        fixtureResults.push({
+          fixture: fixture.id,
+          goal: result.goal,
+          rounds: fixtureSpec.rounds,
+          requestedRounds: result.rounds.length,
+          passed: result.passed,
+          successfulConsecutiveRounds: result.successfulConsecutiveRounds,
+          results: result.rounds
+        });
+      }
+
+      const requiredConsecutiveRounds = fixtureResults.reduce((count, fixtureResult) => count + fixtureResult.rounds, 0);
+      const passed = fixtureResults.every((fixtureResult) => fixtureResult.passed);
+      const summary = {
+        schemaVersion: "real-eval.v1",
+        evidenceLevel: "real",
+        mode: "suite",
+        suiteId: suite.id,
+        suiteName: suite.name,
+        suiteDescription: suite.description,
+        passed,
+        requiredConsecutiveRounds,
+        successfulConsecutiveRounds: countConsecutiveFixtureSuccesses(fixtureResults),
+        profile: options.profile ?? null,
+        requestedFixtures: suite.fixtures.length,
+        requestedRounds: requiredConsecutiveRounds,
+        fixtures: fixtureResults,
+        scoring: {
+          fixtureCount: suite.fixtures.length,
+          passedFixtureCount: fixtureResults.filter((fixtureResult) => fixtureResult.passed).length,
+          completedFixtureCount: fixtureResults.length
+        },
+        evalRoot,
+        startedAt,
+        finishedAt: new Date().toISOString()
       };
       await writeFile(resolve(evalRoot, "summary.json"), JSON.stringify(summary, null, 2));
       console.log(JSON.stringify(summary, null, 2));
@@ -290,6 +407,122 @@ function countLeadingCompleted(results: Array<{ status: string }>): number {
   let count = 0;
   for (const result of results) {
     if (result.status !== "completed") {
+      break;
+    }
+    count += 1;
+  }
+  return count;
+}
+
+function countLeadingPassed(results: Array<{ passed: boolean }>): number {
+  let count = 0;
+  for (const result of results) {
+    if (!result.passed) {
+      break;
+    }
+    count += 1;
+  }
+  return count;
+}
+
+async function runRealEvalFixtureSuite(options: {
+  fixture: RealEvalFixture;
+  rounds: number;
+  goal: string;
+  profileConfigPath: string;
+  profile: string | undefined;
+  baseDir: string;
+}): Promise<{
+  goal: string;
+  passed: boolean;
+  rounds: Array<{
+    round: number;
+    status: string;
+    runId?: string;
+    repoDir: string;
+    changedFiles: string[];
+    passed: boolean;
+    expectedChangedFilesSatisfied: boolean;
+    prohibitedArtifactsDetected: string[];
+    verificationResults: Array<{ command: string; exitCode: number; durationMs: number }>;
+    failures: string[];
+    error?: string;
+  }>;
+  successfulConsecutiveRounds: number;
+}> {
+  const rounds = [];
+  for (let round = 1; round <= options.rounds; round++) {
+    const roundDir = resolve(options.baseDir, `round-${String(round).padStart(2, "0")}`);
+    const repoDir = resolve(roundDir, "repo");
+    await mkdir(roundDir, { recursive: true });
+    await copyRealEvalFixture(options.fixture.id, repoDir);
+    try {
+      const { config } = await runtime(options.profileConfigPath, repoDir, options.profile);
+      if (usesFakeAdapter(config)) {
+        throw new Error("real-eval refuses fake adapter profiles because they cannot produce product evidence.");
+      }
+
+      const fixtureVerificationConfig = {
+        ...config,
+        verification: {
+          ...config.verification,
+          localCommands: [...options.fixture.verificationCommands]
+        }
+      };
+      await initializeRealEvalRepository(repoDir, config.execution.timeoutMs);
+      const store = new StateStore(resolve(repoDir, "runs"));
+      const runner = new Runner(fixtureVerificationConfig, store, repoDir);
+      const result = await runner.run(options.goal);
+      const assessment = await assessRealEvalFixture(options.fixture, repoDir, config.execution.timeoutMs);
+      const passed = result.status === "completed" && assessment.passed;
+      rounds.push({
+        round,
+        status: result.status,
+        runId: result.runId,
+        repoDir,
+        changedFiles: assessment.changedFiles,
+        passed,
+        expectedChangedFilesSatisfied: assessment.expectedChangedFilesSatisfied,
+        prohibitedArtifactsDetected: assessment.prohibitedArtifactsDetected,
+        verificationResults: assessment.verificationResults.map((entry) => ({
+          command: entry.command,
+          exitCode: entry.exitCode,
+          durationMs: entry.durationMs
+        })),
+        failures: passed ? [] : assessment.failures
+      });
+      if (!passed) {
+        break;
+      }
+    } catch (error) {
+      rounds.push({
+        round,
+        status: "failed",
+        repoDir,
+        changedFiles: [],
+        passed: false,
+        expectedChangedFilesSatisfied: false,
+        prohibitedArtifactsDetected: [],
+        verificationResults: [],
+        failures: [ (error as Error).message ],
+        error: (error as Error).message
+      });
+      break;
+    }
+  }
+
+  return {
+    goal: options.goal,
+    passed: rounds.length === options.rounds && rounds.every((round) => round.passed),
+    rounds,
+    successfulConsecutiveRounds: countLeadingPassed(rounds)
+  };
+}
+
+function countConsecutiveFixtureSuccesses(fixtureResults: Array<{ passed: boolean }>): number {
+  let count = 0;
+  for (const result of fixtureResults) {
+    if (!result.passed) {
       break;
     }
     count += 1;
