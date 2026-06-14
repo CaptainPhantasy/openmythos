@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { loadConfigWithOptionalProfile } from "../config/profile.js";
 import { resolveIssueSource } from "../core/issues.js";
 import { collectRunMetrics, summarizeBench } from "../core/metrics.js";
+import { resolvePullRequestSource } from "../core/pull-requests.js";
 import { runReview } from "../core/reviewer.js";
 import { Runner } from "../core/runner.js";
 import { StateStore } from "../state/store.js";
@@ -16,7 +17,7 @@ export function buildCli(): Command {
   program
     .name("openmythos")
     .description("Deterministic multi-model orchestration harness")
-    .version("0.5.0");
+    .version("0.6.0");
 
   program.command("run")
     .argument("<goal>", "Goal to execute")
@@ -66,6 +67,50 @@ export function buildCli(): Command {
       const { config } = await runtime(options.config, options.workdir, options.profile);
       const resolved = await resolveIssueSource(source, resolve(options.workdir), config.execution.timeoutMs);
       console.log(JSON.stringify(resolved, null, 2));
+    });
+
+  program.command("run-pr")
+    .argument("<source>", "Pull request source: local file, PR number, owner/repo#number, or GitHub PR URL")
+    .option("-c, --config <path>", "Config file", "openmythos.config.json")
+    .option("-p, --profile <nameOrPath>", "Config profile overlay")
+    .option("-w, --workdir <path>", "Target working directory", ".")
+    .action(async (source: string, options: { config: string; profile?: string; workdir: string }) => {
+      const { runner, config } = await runtime(options.config, options.workdir, options.profile);
+      const resolved = await resolvePullRequestSource(source, resolve(options.workdir), config.execution.timeoutMs);
+      const result = await runner.runFromPullRequest(resolved.pullRequest, resolved.goal, resolved.verification);
+      console.log(JSON.stringify({
+        pullRequest: resolved.pullRequest,
+        goal: resolved.goal,
+        verification: resolved.verification,
+        result
+      }, null, 2));
+    });
+
+  program.command("pr")
+    .description("Resolve a pull request source into canonical harness input")
+    .argument("<source>", "Pull request source: local file, PR number, owner/repo#number, or GitHub PR URL")
+    .option("-c, --config <path>", "Config file", "openmythos.config.json")
+    .option("-p, --profile <nameOrPath>", "Config profile overlay")
+    .option("-w, --workdir <path>", "Target working directory", ".")
+    .action(async (source: string, options: { config: string; profile?: string; workdir: string }) => {
+      const { config } = await runtime(options.config, options.workdir, options.profile);
+      const resolved = await resolvePullRequestSource(source, resolve(options.workdir), config.execution.timeoutMs);
+      console.log(JSON.stringify(resolved, null, 2));
+    });
+
+  program.command("verify-pr")
+    .description("Collect external verification evidence for a pull request source")
+    .argument("<source>", "Pull request source: local file, PR number, owner/repo#number, or GitHub PR URL")
+    .option("-c, --config <path>", "Config file", "openmythos.config.json")
+    .option("-p, --profile <nameOrPath>", "Config profile overlay")
+    .option("-w, --workdir <path>", "Target working directory", ".")
+    .action(async (source: string, options: { config: string; profile?: string; workdir: string }) => {
+      const { config } = await runtime(options.config, options.workdir, options.profile);
+      const resolved = await resolvePullRequestSource(source, resolve(options.workdir), config.execution.timeoutMs);
+      console.log(JSON.stringify(resolved.verification, null, 2));
+      if (resolved.verification.status === "error") {
+        process.exitCode = 1;
+      }
     });
 
   program.command("eval")

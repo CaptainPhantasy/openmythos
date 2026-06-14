@@ -34,6 +34,8 @@ exhausted.
 - Local verification commands before model QA.
 - Structured `review` command for local git diffs with machine-readable findings.
 - Issue ingestion from local files and GitHub issue references.
+- Pull-request ingestion from local files and GitHub pull requests, with external
+  check summaries retained as run artifacts.
 - Adapter profiles for fake, Z.AI GLM coding, and frontier model experiments.
 - Retained `metrics.json` artifacts and benchmark aggregation with `bench`.
 - Consecutive-round eval command for proving harness stability.
@@ -177,6 +179,15 @@ node dist/index.js run-issue docs/issues/example.md
 node dist/index.js run-issue https://github.com/owner/repo/issues/42
 ```
 
+Resolve, verify, or run from a pull request:
+
+```bash
+node dist/index.js pr docs/pulls/example.md
+node dist/index.js pr owner/repo#17
+node dist/index.js verify-pr https://github.com/owner/repo/pull/17
+node dist/index.js run-pr docs/pulls/example.md
+```
+
 Approval policy:
 
 - `approval.mode = "suggest"` writes per-task review artifacts without blocking.
@@ -211,6 +222,10 @@ Each run writes an inspectable artifact set:
 - `qa.json`: local and model verification result.
 - `issue.json`: canonical issue payload when a run was started from an issue
   source.
+- `pull-request.json`: canonical pull-request payload when a run was started
+  from a pull-request source.
+- `pr-verification.json`: summarized external verification evidence for a
+  GitHub-backed pull request, including check status and failing checks.
 - `governance.json`: repository preflight result, including dirty-tree and
   branch-policy findings.
 - `metrics.json`: retained run metrics, including model calls, token totals,

@@ -9,7 +9,7 @@ import { PhaseExecutor } from "./phases.js";
 import { evaluateGovernance, GovernanceViolationError } from "./governance.js";
 import { ApprovalRequiredError } from "./review.js";
 import { buildRunMetrics } from "./metrics.js";
-import type { ContextResult, IntakeResult, IssueContext, Plan, QaResult, TaskOutput } from "./types.js";
+import type { ContextResult, IntakeResult, IssueContext, Plan, PullRequestContext, PullRequestVerification, QaResult, TaskOutput } from "./types.js";
 
 export interface RunResult {
   runId: string;
@@ -37,6 +37,21 @@ export class Runner {
     const runId = randomUUID();
     await this.store.createRun(runId, goal, this.config.execution.maxRetries);
     await this.store.writeArtifact(runId, "issue.json", issue);
+    return this.executeFrom(runId, goal, governance);
+  }
+
+  async runFromPullRequest(
+    pullRequest: PullRequestContext,
+    goal: string,
+    verification?: PullRequestVerification
+  ): Promise<RunResult> {
+    const governance = await evaluateGovernance(this.config, this.workdir);
+    const runId = randomUUID();
+    await this.store.createRun(runId, goal, this.config.execution.maxRetries);
+    await this.store.writeArtifact(runId, "pull-request.json", pullRequest);
+    if (verification) {
+      await this.store.writeArtifact(runId, "pr-verification.json", verification);
+    }
     return this.executeFrom(runId, goal, governance);
   }
 
@@ -245,6 +260,8 @@ export class Runner {
       "outputs.json",
       "qa.json",
       "issue.json",
+      "pull-request.json",
+      "pr-verification.json",
       "governance.json",
       "metrics.json",
       "final.md"

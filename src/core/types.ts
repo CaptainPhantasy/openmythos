@@ -111,6 +111,42 @@ export interface IssueContext {
   author?: string;
 }
 
+export interface PullRequestCheck {
+  name: string;
+  status: string;
+  conclusion: string;
+  detailsUrl?: string;
+  workflow?: string;
+}
+
+export interface PullRequestContext {
+  source: "local-file" | "github";
+  reference: string;
+  title: string;
+  body: string;
+  labels: string[];
+  checks: PullRequestCheck[];
+  url?: string;
+  number?: number;
+  repository?: string;
+  state?: string;
+  author?: string;
+  baseRefName?: string;
+  headRefName?: string;
+  reviewDecision?: string;
+  isDraft?: boolean;
+}
+
+export interface PullRequestVerification {
+  status: "success" | "warning" | "error";
+  summary: string;
+  passed: boolean | null;
+  failingChecks: string[];
+  nextActions: string[];
+  artifacts: string[];
+  checks: PullRequestCheck[];
+}
+
 export interface AdapterMessage {
   role: "user" | "assistant";
   content: string;
