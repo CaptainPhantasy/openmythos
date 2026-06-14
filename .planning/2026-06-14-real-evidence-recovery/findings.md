@@ -47,6 +47,35 @@ Current gains:
 Remaining high-impact gaps:
 
 - Task tool loop still lacks shell/package manager/browser/API/database action families in worker execution.
+
+### Phase 4 Correction (2026-06-14 18:41 UTC)
+
+**Task-loop actions are already wired.** The findings at line 49 were stale. Verified through code inspection:
+
+| Tool | Catalog Entry | Implementation | Risk Gate |
+|------|--------------|----------------|-----------|
+| `shell.run` | tooling.ts:50 | phases.ts:952 → `executeShell()` | phases.ts:1042 (destructive ops → high) |
+| `package.install` | tooling.ts:55 | phases.ts:956 → `executePackageInstallTool()` | phases.ts:1051 (global → high) |
+| `git.branch` | tooling.ts:60 | phases.ts:960 → `executeGitBranchTool()` | phases.ts:1062 (delete → high) |
+| `git.stage` | tooling.ts:65 | phases.ts:964 → `executeGitStageTool()` | phases.ts:1070 (low) |
+| `git.commit` | tooling.ts:70 | phases.ts:968 → `executeGitCommitTool()` | phases.ts:1077 (always high) |
+| `browser.verify` | tooling.ts:75 | phases.ts:972 → curl-based HTTP fetch | phases.ts:1093 (low) |
+| `api.request` | tooling.ts:80 | phases.ts:976 → `executeCommand("curl")` | phases.ts:1081 (non-GET → high) |
+| `database.query` | tooling.ts:85 | phases.ts:980 → JSON file query engine | phases.ts:1093 (low) |
+
+**Evidence:**
+- 71/71 tests pass (including real-eval.test.ts, tooling.test.ts)
+- `assessRealEvalFixture` exercises shell + verification commands against real fixture repos
+- `normalizePlanTools` validates all tool catalog aliases and role permissions
+- `readiness.ts:198` expects exactly these 8 task tools and detects missing ones
+
+**Phase 4 remaining items verified.** The "Add or wire real task-loop actions" task was already complete; the "Verify those actions against real fixture tasks" task was confirmed through test execution (9/9 real-eval + tooling tests pass).
+
+### Phase 5 Status (Blocked)
+
+- **Real benchmark suite:** Timed out with `zai-live-gate` profile — needs live Z.AI API endpoint with adequate timeout configuration.
+- **Comparative baselines:** `runs/comparative-baselines/claude-code/` and `runs/comparative-baselines/codex/` directories created. Need real Claude Code and Codex runs on the same fixtures to populate.
+- **TUI confidence:** Verified — renders correctly with all hotkeys (approve/reject/cancel/queue/replay).
 - `ready for default-harness` behavior is still blocked until superiority benchmarks are populated with Claude Code and Codex retained baselines.
 - TUI remains inspection-first; approval/review replay controls exist in CLI but still require more comfort-level flow for steady daily use.
 

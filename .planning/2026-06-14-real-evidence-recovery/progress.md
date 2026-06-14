@@ -4,6 +4,28 @@
 
 ### Phase 4: Expand Real Worker Actions
 
+### Phase 4 Completion (2026-06-14 18:41 UTC)
+
+- **Status:** complete
+- **Key finding:** All 8 task-loop action families already wired in `phases.ts` with real implementations (confirmed via code inspection, not assumption). Previous claim in findings.md was stale.
+- **Verification:**
+  - `npm test`: 71/71 pass (0 failures)
+  - `npm run build`: clean
+  - `real-eval.test.ts` + `tooling.test.ts`: 9/9 pass (exercises shell, verification commands against real fixture repos)
+  - `npm run cli -- tui --workdir . --once`: renders correctly, all hotkeys present
+- **Evidence:**
+  - Tool catalog in `tooling.ts:23-119` defines all 8 action families
+  - Phase executor in `phases.ts:952-983` dispatches all 8 with real implementations
+  - Risk gating in `phases.ts:1042-1093` covers destructive/git-write/non-GET-API
+  - `schemas.ts:210-217` validates all tool IDs in the task tool contract
+  - `readiness.ts:198` enforces the 8-tool expectation
+
+### Phase 5 Blockers (2026-06-14 18:41 UTC)
+
+- **Real benchmark suite:** BLOCKED — `zai-live-gate` profile times out (needs live Z.AI API endpoint)
+- **Comparative baselines:** BLOCKED — requires real Claude Code and Codex runs on fixtures
+- **TUI:** verified hotkeys present (approve/reject/cancel/queue/replay)
+
 - **Status:** in progress
 - **Started:** 2026-06-14
 - Actions taken:
