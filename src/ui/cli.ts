@@ -34,6 +34,16 @@ import { defaultRoutingPolicies, routeModel, classifyComplexity, classifyRisk } 
 import { runInit, getProviderPresets } from "../core/init.js";
 import { createChatSession, runChatRepl } from "./chat.js";
 import { AdapterRegistry } from "../adapters/registry.js";
+import {
+  createSnapshot,
+  restoreSnapshot,
+  listSnapshots,
+  applyBatch,
+  analyzeImpact,
+  aggregateCost,
+  applyPatch,
+  type BatchEdit,
+} from "../core/advanced-tools.js";
 export function buildCli(): Command {
   const program = new Command();
 
@@ -1435,6 +1445,93 @@ export function buildCli(): Command {
         else { await rm(fullPath, { recursive: true, force: true }); console.log(`Deleted: ${entry}`); }
       }
       console.log(`${options.dryRun ? "Would delete" : "Deleted"} ${toDelete.length} run(s).`);
+    });
+
+  // === ADVANCED TOOLS (2027 harness differentiators) ===
+  program.command("snapshot")
+    .description("Create a checkpoint of the current workdir for instant rollback")
+    .argument("[label]", "Snapshot label/name")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .action(async (label: string | undefined, options: { workdir: string }) => {
+      const snap = await createSnapshot(resolve(options.workdir), label);
+      console.log(JSON.stringify({ id: snap.id, files: snap.fileCount, createdAt: snap.createdAt }));
+    });
+
+  program.command("restore")
+    .description("Restore workdir from a snapshot")
+    .argument("<snapshotId>", "Snapshot id to restore")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .action(async (snapshotId: string, options: { workdir: string }) => {
+      const snap = await restoreSnapshot(resolve(options.workdir), snapshotId);
+      console.log(JSON.stringify({ restored: snap.id, files: snap.fileCount }));
+    });
+
+  program.command("snapshots")
+    .description("List available snapshots")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .action(async (options: { workdir: string }) => {
+      const snaps = await listSnapshots(resolve(options.workdir));
+      if (snaps.length === 0) { console.log("No snapshots."); return; }
+      for (const s of snaps) {
+        console.log(`${s.id}  ${s.fileCount} files  ${s.createdAt}`);
+      }
+    });
+
+  program.command("batch")
+    .description("Apply multiple file edits atomically from a JSON manifest")
+    .argument("<manifest>", "Path to JSON file with batch edits")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .option("--dry-run", "Validate without applying")
+    .action(async (manifest: string, options: { workdir: string; dryRun?: boolean }) => {
+      const edits = JSON.parse(await readFile(resolve(options.workdir, manifest), "utf8")) as BatchEdit[];
+      if (options.dryRun) {
+        console.log(JSON.stringify({ edits: edits.length, wouldApply: true }));
+        return;
+      }
+      const result = await applyBatch(resolve(options.workdir), edits);
+      console.log(JSON.stringify(result, null, 2));
+      if (result.errors.length > 0) process.exitCode = 1;
+    });
+
+  program.command("impact")
+    .description("Analyze dependency blast-radius before editing a symbol")
+    .argument("<symbol>", "Function/variable/import name to trace")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .action(async (symbol: string, options: { workdir: string }) => {
+      const result = await analyzeImpact(resolve(options.workdir), symbol);
+      if (result.files.length === 0) { console.log(`No references to "${symbol}" found.`); return; }
+      console.log(`Symbol: ${symbol}  (${result.totalMatches} matches in ${result.files.length} files)\n`);
+      for (const f of result.files.slice(0, 30)) {
+        console.log(`  ${f.matches}x  ${f.file}  lines: ${f.lines.slice(0, 5).join(",")}${f.lines.length > 5 ? "..." : ""}`);
+      }
+    });
+
+  program.command("cost")
+    .description("Aggregate token usage and estimated cost across all runs")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .action(async (options: { workdir: string }) => {
+      const report = await aggregateCost(resolve(options.workdir));
+      console.log(`Runs: ${report.runs}`);
+      console.log(`Tokens: ${report.totalTokens.toLocaleString()} (${report.totalInputTokens.toLocaleString()} in / ${report.totalOutputTokens.toLocaleString()} out)`);
+      console.log(`Estimated cost: $${(report.estimatedCostCents / 100).toFixed(4)}`);
+      console.log(`\nBy model:`);
+      for (const [model, usage] of Object.entries(report.byModel)) {
+        console.log(`  ${model}: ${usage.calls} calls, ${(usage.inputTokens + usage.outputTokens).toLocaleString()} tokens`);
+      }
+    });
+
+  program.command("apply-patch")
+    .description("Apply a unified diff patch with automatic backup")
+    .argument("<patchFile>", "Path to the .patch/.diff file")
+    .option("-w, --workdir <path>", "Working directory", ".")
+    .action(async (patchFile: string, options: { workdir: string }) => {
+      try {
+        const result = await applyPatch(resolve(options.workdir), patchFile);
+        console.log(JSON.stringify({ applied: result.applied, backup: result.backupPath }));
+      } catch (error) {
+        console.error(`Patch failed: ${(error as Error).message}`);
+        process.exitCode = 1;
+      }
     });
 
   return program;
