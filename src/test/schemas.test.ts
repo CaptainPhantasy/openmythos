@@ -185,6 +185,33 @@ test("schemas normalize single string list fields from live model output", () =>
       }
     }]
   });
-  assert.equal(toolStep.toolRequests[0]?.tool, "verification.command");
+  assert.equal(toolStep.toolRequests[0]?.tool, "shell.run");
   assert.equal(toolStep.toolRequests[0]?.input.command, "test -f openmythos-live-output.txt");
+
+  const packageTool = taskStepSchema.parse({
+    taskId: "task-2",
+    status: "tool",
+    summary: "Need to run a package action",
+    toolRequests: [{
+      tool: "package.install",
+      input: {
+        command: "npm install --dry-run"
+      }
+    }]
+  });
+  assert.equal(packageTool.toolRequests[0]?.tool, "package.install");
+
+  const databaseTool = taskStepSchema.parse({
+    taskId: "task-3",
+    status: "tool",
+    summary: "Need to run a database query",
+    toolRequests: [{
+      tool: "database.query",
+      input: {
+        paths: ["db.json"],
+        query: "count(*)"
+      }
+    }]
+  });
+  assert.equal(databaseTool.toolRequests[0]?.tool, "database.query");
 });

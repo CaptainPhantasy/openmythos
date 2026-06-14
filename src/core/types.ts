@@ -58,7 +58,7 @@ export interface CommandReceipt {
 }
 
 export interface TaskToolRequest {
-  tool: "filesystem.read" | "filesystem.search" | "code.symbols" | "git.status" | "git.diff" | "verification.command";
+  tool: "filesystem.read" | "filesystem.search" | "code.symbols" | "git.status" | "git.diff" | "verification.command" | "shell.run" | "package.install" | "git.branch" | "git.stage" | "git.commit" | "browser.verify" | "api.request" | "database.query";
   input: {
     query?: string;
     paths?: string[];

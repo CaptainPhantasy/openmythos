@@ -52,6 +52,41 @@ const toolCatalog: ToolDefinition[] = [
     roles: ["coder", "verifier"]
   },
   {
+    id: "package.install",
+    description: "Run restricted package-manager install commands.",
+    roles: ["coder", "verifier"]
+  },
+  {
+    id: "git.branch",
+    description: "Create, list, switch, or delete git branches with bounded operations.",
+    roles: ["coder", "verifier"]
+  },
+  {
+    id: "git.stage",
+    description: "Stage or unstage tracked file paths using git.",
+    roles: ["coder", "verifier"]
+  },
+  {
+    id: "git.commit",
+    description: "Create a commit from current staged changes with a bounded message.",
+    roles: ["coder", "verifier"]
+  },
+  {
+    id: "browser.verify",
+    description: "Run deterministic browser/UI endpoint checks for harnessed verification.",
+    roles: ["coder", "critic", "verifier"]
+  },
+  {
+    id: "api.request",
+    description: "Issue bounded HTTP API requests with method and URL validation.",
+    roles: ["coder", "critic", "verifier"]
+  },
+  {
+    id: "database.query",
+    description: "Run bounded local database-style read queries for evidence.",
+    roles: ["coder", "critic", "verifier"]
+  },
+  {
     id: "verification.command",
     description: "Run deterministic command-based verification checks.",
     roles: ["coder", "critic", "verifier"]
@@ -121,13 +156,29 @@ const aliasMap: Record<string, string> = {
   shell: "shell.run",
   command: "shell.run",
   commands: "shell.run",
+  run: "shell.run",
+  shell_command: "shell.run",
+  shellcmd: "shell.run",
   test: "verification.command",
   verify: "verification.command",
   verification: "verification.command",
+  browser: "browser.verify",
+  browse: "browser.verify",
+  web: "browser.verify",
+  ui: "browser.verify",
+  api: "api.request",
+  request: "api.request",
+  fetch: "api.request",
+  curl: "api.request",
+  database: "database.query",
+  db: "database.query",
+  query: "database.query",
+  sql: "database.query",
+  install: "package.install",
+  installer: "package.install",
   review: "review.inspect",
   diff: "git.diff",
   "git.read": "git.status",
-  "git.branch": "git.status",
   "git.pr": "git.pr_view",
   "git.pull_request": "git.pr_view",
   "git.issue": "git.issue_view",

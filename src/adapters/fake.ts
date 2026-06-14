@@ -65,6 +65,9 @@ export class FakeAdapter implements ModelAdapter {
     }
 
     if (request.system.includes("create deterministic execution plans")) {
+      const messageText = request.messages.map((message) => message.content).join("\n");
+      const toolFamilyEndpointMatch = messageText.match(/endpoint=(https?:\/\/127\.0\.0\.1:\d+(?:\/[^\s"]*)?)/i);
+      const toolFamilyEndpoint = (toolFamilyEndpointMatch?.[1] ?? "http://127.0.0.1:4174").replace(/\/$/, "");
       const failingVerification = request.messages.some((message) => message.content.includes("failing task verification"));
       const aliasTools = request.messages.some((message) => message.content.includes("alias tool normalization"));
       const verifierRouting = request.messages.some((message) => message.content.includes("verifier task routing"));
@@ -72,6 +75,7 @@ export class FakeAdapter implements ModelAdapter {
       const harnessStatusAction = request.messages.some((message) => message.content.includes("harness git status action"));
       const taskScopedRetrieval = request.messages.some((message) => message.content.includes("task scoped retrieval"));
       const modelToolLoop = request.messages.some((message) => message.content.includes("model tool loop"));
+      const modelToolFamilies = request.messages.some((message) => message.content.includes("model tool families"));
       const modelVerificationCommandLoop = request.messages.some((message) => message.content.includes("model verification command loop"));
       const dependencyScopedHandoff = request.messages.some((message) => message.content.includes("dependency scoped handoff"));
       const taskSnippetScoping = request.messages.some((message) => message.content.includes("task snippet scoping"));
@@ -115,12 +119,12 @@ export class FakeAdapter implements ModelAdapter {
                   "The verification command succeeds"
                 ]
               }
-            ]
-          : modelToolLoop
-          ? [
-              {
-                id: "task-1",
-                title: "Create fake output marker through model tool loop",
+        ]
+      : modelToolLoop
+      ? [
+          {
+            id: "task-1",
+            title: "Create fake output marker through model tool loop",
                 description: "Request read-only harness tools before producing the final file edit.",
                 role: "coder",
                 executor: "model",
@@ -133,12 +137,52 @@ export class FakeAdapter implements ModelAdapter {
                 acceptanceCriteria: [
                   "The file exists",
                   "The file contains OPENMYTHOS_FAKE_SUCCESS"
-                ]
-              }
             ]
-          : taskSnippetScoping
-          ? [
-              {
+          }
+        ]
+      : modelToolFamilies
+      ? [
+          {
+            id: "task-1",
+            title: "Create fake output marker through expanded tool families",
+            description: "Exercise shell, package install, git, browser, API, and database tool families before finalizing the marker.",
+            role: "coder",
+            executor: "model",
+            harnessAction: null,
+            contextQueries: [],
+            fileTargets: [
+              "openmythos-fake-output.txt",
+              "families.txt",
+              "families-db.json",
+              "package.json"
+            ],
+            requiredTools: [
+              "filesystem.write",
+              "shell.run",
+              "package.install",
+              "git.branch",
+              "git.stage",
+              "git.commit",
+              "browser.verify",
+              "api.request",
+              "database.query"
+            ],
+            verificationCommands: [
+              "test -f openmythos-fake-output.txt",
+              "grep -qx 'OPENMYTHOS_FAKE_SUCCESS' openmythos-fake-output.txt",
+              "git show --oneline --no-patch --max-count=1 | cat"
+            ],
+            executionMode: "serial",
+            acceptanceCriteria: [
+              "The file exists",
+              "The file contains OPENMYTHOS_FAKE_SUCCESS",
+              "The model executed the expanded family loop."
+            ]
+          }
+        ]
+      : taskSnippetScoping
+      ? [
+          {
                 id: "task-1",
                 title: "Create alpha-only report",
                 description: "Use only ALPHA_ONLY repository snippet context to create the report.",
@@ -324,10 +368,16 @@ export class FakeAdapter implements ModelAdapter {
 
     if (request.system.includes("implement one planned task") || request.system.includes("review and correct one planned task")) {
       const modelToolLoop = request.messages.some((message) => message.content.includes("Create fake output marker through model tool loop"));
+      const modelToolFamilies = request.messages.some((message) => message.content.includes("Create fake output marker through expanded tool families"));
       const modelVerificationCommandLoop = request.messages.some((message) => message.content.includes("Create fake output marker after command-backed verification"));
       const dependencyHandoffReport = request.messages.some((message) => message.content.includes("Create dependency handoff report"));
       const taskSnippetScoping = request.messages.some((message) => message.content.includes("Create alpha-only report"));
       const hasToolResults = request.messages.some((message) => message.content.includes("Tool results for the previous request:"));
+      const messageText = request.messages.map((message) => message.content).join("\n");
+      const toolFamilyEndpointMatch = messageText.match(/endpoint=(https?:\/\/127\.0\.0\.1:\d+(?:\/[^\s"]*)?)/i);
+      const toolFamilyEndpoint = (toolFamilyEndpointMatch?.[1] ?? "http://127.0.0.1:4174").replace(/\/$/, "");
+      const toolFamilyEndpointHealth = `${toolFamilyEndpoint}/health`;
+      const toolFamilyApiEndpoint = `${toolFamilyEndpoint}/api`;
       const taskId = request.messages.some((message) => message.content.includes('"id": "task-3"'))
         ? "task-3"
         : request.messages.some((message) => message.content.includes('"id": "task-2"'))
@@ -416,6 +466,105 @@ export class FakeAdapter implements ModelAdapter {
             }
           ]
         };
+      }
+      if (modelToolFamilies && !hasToolResults) {
+        return {
+          taskId,
+          status: "tool",
+          fileEdits: [],
+          summary: "Need expanded family tool evidence before writing the marker file.",
+          errors: [],
+          toolRequests: [
+            {
+              tool: "shell.run",
+              input: { command: "cat package.json" }
+            },
+            {
+              tool: "package.install",
+              input: { command: "npm install --dry-run" }
+            },
+            {
+              tool: "git.branch",
+              input: { command: "list" }
+            }
+          ]
+        };
+      }
+      if (modelToolFamilies && hasToolResults) {
+        const sawShellRun = /"kind"\s*:\s*"shell.run"/.test(messageText);
+        const sawPackageInstall = /"kind"\s*:\s*"package.install"/.test(messageText);
+        const sawGitBranch = /"kind"\s*:\s*"git.branch"/.test(messageText);
+        const sawGitStage = /"kind"\s*:\s*"git.stage"/.test(messageText);
+        const sawGitCommit = /"kind"\s*:\s*"git.commit"/.test(messageText);
+        const sawBrowserVerify = /"kind"\s*:\s*"browser.verify"/.test(messageText);
+        const sawApiRequest = /"kind"\s*:\s*"api.request"/.test(messageText);
+        const sawDatabaseQuery = /"kind"\s*:\s*"database.query"/.test(messageText);
+
+        if (!sawShellRun || !sawPackageInstall || !sawGitBranch) {
+          return {
+            taskId,
+            status: "tool",
+            fileEdits: [],
+            summary: "Need shell/package/git-stage evidence before writing the marker file.",
+            errors: [],
+            toolRequests: [
+              {
+                tool: "shell.run",
+                input: { command: "cat package.json" }
+              },
+              {
+                tool: "package.install",
+                input: { command: "npm install --dry-run" }
+              },
+              {
+                tool: "git.branch",
+                input: { command: "list" }
+              }
+            ]
+          };
+        }
+        if (!sawGitStage || !sawGitCommit || !sawBrowserVerify) {
+          return {
+            taskId,
+            status: "tool",
+            fileEdits: [],
+            summary: "Need git and browser evidence before writing the marker file.",
+            errors: [],
+            toolRequests: [
+              {
+                tool: "git.stage",
+                input: { command: "add", paths: ["families.txt"] }
+              },
+              {
+                tool: "git.commit",
+                input: { query: "families tool families" }
+              },
+              {
+                tool: "browser.verify",
+                input: { query: toolFamilyEndpointHealth, command: "TOOL_FAMILIES_OK" }
+              }
+            ]
+          };
+        }
+        if (!sawApiRequest || !sawDatabaseQuery) {
+          return {
+            taskId,
+            status: "tool",
+            fileEdits: [],
+            summary: "Need API and database evidence before writing the marker file.",
+            errors: [],
+            toolRequests: [
+              {
+                tool: "api.request",
+                input: { command: `GET ${toolFamilyApiEndpoint}` }
+              },
+              {
+                tool: "database.query",
+                input: { paths: ["families-db.json"], query: "count(*)" }
+              }
+            ]
+          };
+        }
       }
       return {
         taskId,

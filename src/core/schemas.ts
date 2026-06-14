@@ -192,12 +192,30 @@ export const taskToolRequestSchema = z.object({
     if (typeof value === "string") {
       const normalized = value.toLowerCase();
       if (normalized === "shell.run" || normalized === "shell.exec" || normalized === "shell_execute") {
+        return "shell.run";
+      }
+      if (normalized === "verify" || normalized === "test") {
         return "verification.command";
       }
       return normalized;
     }
     return value;
-  }, z.enum(["filesystem.read", "filesystem.search", "code.symbols", "git.status", "git.diff", "verification.command"])),
+  }, z.enum([
+    "filesystem.read",
+    "filesystem.search",
+    "code.symbols",
+    "git.status",
+    "git.diff",
+    "verification.command",
+    "shell.run",
+    "package.install",
+    "git.branch",
+    "git.stage",
+    "git.commit",
+    "browser.verify",
+    "api.request",
+    "database.query"
+  ])),
   input: z.object({
     query: z.string().optional(),
     paths: stringListSchema.optional(),

@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { execSync } from "node:child_process";
 import { mkdtemp, readFile, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { createServer } from "node:http";
 import { join, resolve } from "node:path";
+import { AddressInfo } from "node:net";
 import test from "node:test";
 import { loadConfigWithOptionalProfile } from "../config/profile.js";
 import { Runner } from "../core/runner.js";
@@ -264,6 +267,90 @@ test("Runner supports bounded tool-use turns inside a model task", async () => {
   assert.ok(execution[0]?.artifacts.some((artifact) => artifact.endsWith("task-tool-turns-task-1.json")));
   assert.equal(metrics.modelToolTurnCount, 1);
   assert.equal(metrics.modelToolCallCount, 2);
+});
+
+test("Runner can execute expanded model tool families through multi-turn loop", async () => {
+  const workdir = await mkdtemp(join(tmpdir(), "openmythos-fake-tool-families-"));
+  const toolFamiliesDir = resolve(workdir, "src");
+  await mkdir(toolFamiliesDir, { recursive: true });
+  await writeFile(resolve(workdir, "families.txt"), "export const families = true;\n", "utf8");
+  await writeFile(resolve(workdir, "package.json"), JSON.stringify({
+    name: "openmythos-families",
+    version: "1.0.0"
+  }), "utf8");
+  await writeFile(resolve(workdir, "families-db.json"), JSON.stringify([
+    { id: 1, status: "ready" },
+    { id: 2, status: "running" }
+  ], null, 2), "utf8");
+
+  execSync("git init -q", { cwd: workdir });
+  execSync('git -c user.email="test@example.com" -c user.name="OpenMythos Test" commit --allow-empty -m "bootstrap"', { cwd: workdir });
+
+  const server = createServer((request, response) => {
+    if (request.url === "/health") {
+      response.statusCode = 200;
+      response.end("TOOL_FAMILIES_OK");
+      return;
+    }
+    if (request.url === "/api") {
+      response.statusCode = 200;
+      response.end(JSON.stringify({ ok: true }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end("not found");
+  });
+  await new Promise<void>((resolveServer) => server.listen(0, "127.0.0.1", () => resolveServer()));
+  const boundAddress = server.address();
+  if (boundAddress === null || typeof boundAddress === "string") {
+    server.close();
+    throw new Error("Expected bound TCP address for local tool families server.");
+  }
+  const endpoint = `http://127.0.0.1:${(boundAddress as AddressInfo).port}`;
+
+  try {
+    const config = await loadConfigWithOptionalProfile(resolve("openmythos.config.json"), "fake");
+    const runner = new Runner(config, new StateStore(resolve(workdir, "runs")), workdir);
+
+    const result = await runner.run(`model tool families endpoint=${endpoint}`);
+    const execution = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "execution.json"), "utf8") ) as Array<{
+      taskId: string;
+      status: string;
+      toolTurnCount: number;
+      toolCallCount: number;
+      observations: Array<{ kind: string; status: string; summary: string; nextActions: string[]; content: string }>;
+    }>;
+    const marker = await readFile(resolve(workdir, "openmythos-fake-output.txt"), "utf8");
+    const latestCommit = execSync("git log -1 --pretty=%s", { cwd: workdir }).toString().trim();
+    const metricsText = await readFile(resolve(workdir, "runs", result.runId, "metrics.json"), "utf8");
+    const metrics = JSON.parse(metricsText) as {
+      modelToolTurnCount: number;
+      modelToolCallCount: number;
+    };
+    const observedKinds = new Set(execution[0]?.observations.map((observation) => observation.kind));
+
+    assert.equal(result.status, "completed");
+    assert.equal(marker, "OPENMYTHOS_FAKE_SUCCESS\n");
+    assert.equal(execution[0]?.taskId, "task-1");
+    assert.equal(execution[0]?.status, "success");
+    assert.equal(execution[0]?.toolTurnCount, 3);
+    assert.equal(execution[0]?.toolCallCount, 8);
+    assert.equal(execution[0]?.observations.some((observation) => observation.kind === "shell.run"), true);
+    assert.equal(execution[0]?.observations.some((observation) => observation.kind === "package.install"), true);
+    assert.equal(execution[0]?.observations.some((observation) => observation.kind === "git.branch"), true);
+    assert.equal(execution[0]?.observations.some((observation) => observation.kind === "git.stage"), true);
+    assert.equal(execution[0]?.observations.some((observation) => observation.kind === "git.commit"), true);
+    assert.equal(execution[0]?.observations.some((observation) => observation.kind === "browser.verify"), true);
+    assert.equal(execution[0]?.observations.some((observation) => observation.kind === "api.request"), true);
+    assert.equal(execution[0]?.observations.some((observation) => observation.kind === "database.query"), true);
+    assert.equal(observedKinds.has("database.query"), true);
+    assert.equal(latestCommit, "families tool families");
+    assert.equal(metrics.modelToolTurnCount, 3);
+    assert.equal(metrics.modelToolCallCount, 8);
+    assert.ok(marker.length > 0);
+  } finally {
+    server.close();
+  }
 });
 
 test("Runner supports planner-declared verification.command requests inside a model task", async () => {

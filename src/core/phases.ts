@@ -16,7 +16,7 @@ import {
   VERIFIER_SYSTEM
 } from "../prompts/contracts.js";
 import { applyFileEdits } from "../tools/files.js";
-import { executeShell, type ShellResult } from "../tools/shell.js";
+import { executeCommand, executeShell, type ShellResult } from "../tools/shell.js";
 import { findSymbolDefinitions, searchRepository } from "../tools/retrieval.js";
 import { parseJsonFromModel } from "./json.js";
 import { ApprovalRequiredError, createReviewBundle } from "./review.js";
@@ -841,6 +841,38 @@ export class PhaseExecutor {
         case "code.symbols":
           observations.push(await findSymbolDefinitions(this.workdir, request.input.query ?? "", this.config.execution.timeoutMs));
           break;
+        case "shell.run": {
+          observations.push(await this.executeShellTool(request.input.command ?? ""));
+          break;
+        }
+        case "package.install": {
+          observations.push(await this.executePackageInstallTool(request.input.command ?? ""));
+          break;
+        }
+        case "git.branch": {
+          observations.push(await this.executeGitBranchTool(request));
+          break;
+        }
+        case "git.stage": {
+          observations.push(await this.executeGitStageTool(request));
+          break;
+        }
+        case "git.commit": {
+          observations.push(await this.executeGitCommitTool(request));
+          break;
+        }
+        case "browser.verify": {
+          observations.push(await this.executeBrowserVerifyTool(request.input));
+          break;
+        }
+        case "api.request": {
+          observations.push(await this.executeApiRequestTool(request.input));
+          break;
+        }
+        case "database.query": {
+          observations.push(await this.executeDatabaseQueryTool(request.input));
+          break;
+        }
         case "git.status": {
           const gitStatus = await this.collectGitStatusObservation();
           if (gitStatus) {
@@ -897,6 +929,507 @@ export class PhaseExecutor {
       }
     }
     return observations;
+  }
+
+  private async executeShellTool(command: string): Promise<TaskObservation> {
+    const requestedCommand = command.trim();
+    if (requestedCommand.length === 0) {
+      return {
+        kind: "shell.run",
+        status: "warning",
+        summary: "shell.run request omitted command.",
+        content: "Provide one exact command string in input.command.",
+        nextActions: ["Retry shell.run with a bounded command string."],
+        artifacts: []
+      };
+    }
+
+    const validation = this.validateCommandShape(requestedCommand);
+    if (!validation.ok) {
+      return {
+        kind: "shell.run",
+        status: "error",
+        summary: "shell.run command was rejected for safety.",
+        content: validation.reason,
+        nextActions: ["Use one simple command from the allowed shell run list and avoid shell metacharacters."],
+        artifacts: []
+      };
+    }
+
+    const result = await executeShell(requestedCommand, this.workdir, this.config.execution.timeoutMs);
+    return {
+      kind: "shell.run",
+      status: result.exitCode === 0 ? "success" : "warning",
+      summary: result.exitCode === 0 ? `shell.run succeeded: ${requestedCommand}` : `shell.run failed: ${requestedCommand}`,
+      content: [result.stdout, result.stderr].filter(Boolean).join("\n").trim() || `(exit ${result.exitCode})`,
+      nextActions: result.exitCode === 0
+        ? []
+        : ["Inspect the command output and retry with a corrected allowed shell command."],
+      artifacts: []
+    };
+  }
+
+  private async executePackageInstallTool(command: string): Promise<TaskObservation> {
+    const requestedCommand = command.trim();
+    if (requestedCommand.length === 0) {
+      return {
+        kind: "package.install",
+        status: "warning",
+        summary: "package.install request omitted command.",
+        content: "Provide a package manager install command in input.command.",
+        nextActions: ["Retry package.install with a bounded install command such as npm install --dry-run."],
+        artifacts: []
+      };
+    }
+
+    const safeCommand = this.normalizePackageInstallCommand(requestedCommand);
+    if (safeCommand === null) {
+      return {
+        kind: "package.install",
+        status: "error",
+        summary: "package.install command is not permitted.",
+        content: `Disallowed or unsafe package command: ${requestedCommand}`,
+        nextActions: ["Use npm/pnpm/yarn install commands with --dry-run only."],
+        artifacts: []
+      };
+    }
+
+    const result = await executeShell(safeCommand, this.workdir, this.config.execution.timeoutMs);
+    return {
+      kind: "package.install",
+      status: result.exitCode === 0 ? "success" : "warning",
+      summary: result.exitCode === 0
+        ? `Package install command completed safely: ${safeCommand}`
+        : `Package install command failed: ${safeCommand}`,
+      content: [result.stdout, result.stderr].filter(Boolean).join("\n").trim() || `(exit ${result.exitCode})`,
+      nextActions: result.exitCode === 0
+        ? ["Review the package command output for warnings or security concerns before proceeding."]
+        : ["Fix the package command or retry with a compatible --dry-run install command."],
+      artifacts: []
+    };
+  }
+
+  private async executeGitBranchTool(request: TaskToolRequest): Promise<TaskObservation> {
+    const action = (request.input.command ?? "").trim().toLowerCase();
+    const branchName = (request.input.query ?? "").trim();
+    const safeBranches = branchName.length === 0 ? [] : this.splitSafeShellArguments(branchName);
+    const requestedCommand = action.length === 0 ? (safeBranches.length === 0 ? "list" : "create") : action;
+
+    if (safeBranches.some((part) => /["'`$]/.test(part))) {
+      return {
+        kind: "git.branch",
+        status: "error",
+        summary: "git.branch request contains unsafe branch text.",
+        content: `Unsafe branch token detected in ${branchName}`,
+        nextActions: ["Retry git.branch with a simple branch name using URL-safe characters only."],
+        artifacts: []
+      };
+    }
+
+    let gitCommand = "git branch";
+    if (requestedCommand === "create" || requestedCommand === "new" || requestedCommand === "branch") {
+      if (branchName.length === 0) {
+        return {
+          kind: "git.branch",
+          status: "error",
+          summary: "git.branch create requested without branch name.",
+          content: "Use input.query with the branch name and leave command empty or set command to \"create\".",
+          nextActions: ["Retry with a non-empty branch name in input.query."],
+          artifacts: []
+        };
+      }
+      gitCommand = `git branch ${this.shellQuote(branchName)}`;
+    } else if (requestedCommand === "switch" || requestedCommand === "checkout" || requestedCommand === "checkout -b") {
+      if (branchName.length === 0) {
+        return {
+          kind: "git.branch",
+          status: "error",
+          summary: "git.branch switch requested without branch name.",
+          content: "Use input.query with a branch name and command set to \"switch\".",
+          nextActions: ["Retry with a branch name in input.query."],
+          artifacts: []
+        };
+      }
+      gitCommand = requestedCommand === "switch"
+        ? `git switch ${this.shellQuote(branchName)}`
+        : `git checkout ${this.shellQuote(branchName)}`;
+    } else if (requestedCommand === "status" || requestedCommand === "current") {
+      gitCommand = "git branch --show-current";
+    } else if (requestedCommand === "delete") {
+      if (branchName.length === 0) {
+        return {
+          kind: "git.branch",
+          status: "error",
+          summary: "git.branch delete requested without branch name.",
+          content: "Use input.query with a branch name and command set to \"delete\".",
+          nextActions: ["Retry with a branch name in input.query."],
+          artifacts: []
+        };
+      }
+      gitCommand = `git branch -d ${this.shellQuote(branchName)}`;
+    } else if (requestedCommand === "force-delete" || requestedCommand === "delete-force") {
+      if (branchName.length === 0) {
+        return {
+          kind: "git.branch",
+          status: "error",
+          summary: "git.branch delete-force requested without branch name.",
+          content: "Use input.query with a branch name and command set to \"delete-force\".",
+          nextActions: ["Retry with a branch name in input.query."],
+          artifacts: []
+        };
+      }
+      gitCommand = `git branch -D ${this.shellQuote(branchName)}`;
+    } else if (requestedCommand === "list" || requestedCommand === "show") {
+      gitCommand = "git branch --color=never";
+    } else {
+      if (branchName.length > 0 && (action.length === 0 || action === "create")) {
+        gitCommand = `git branch ${this.shellQuote(branchName)}`;
+      } else {
+        return {
+          kind: "git.branch",
+          status: "warning",
+          summary: `Unsupported git.branch command: ${action}`,
+          content: "Use one of: list, status, create, switch, delete, delete-force",
+          nextActions: ["Retry git.branch with a supported command value."],
+          artifacts: []
+        };
+      }
+    }
+
+    const result = await executeShell(gitCommand, this.workdir, this.config.execution.timeoutMs);
+    return {
+      kind: "git.branch",
+      status: result.exitCode === 0 ? "success" : "warning",
+      summary: result.exitCode === 0 ? `git.branch executed: ${gitCommand}` : `git.branch failed: ${gitCommand}`,
+      content: [result.stdout, result.stderr].filter(Boolean).join("\n").trim() || `(exit ${result.exitCode})`,
+      nextActions: result.exitCode === 0
+        ? []
+        : ["Check git command output and rerun git.branch with a supported action and branch name."],
+      artifacts: []
+    };
+  }
+
+  private async executeGitStageTool(request: TaskToolRequest): Promise<TaskObservation> {
+    const targets = (request.input.paths ?? []).slice(0, 15);
+    if (targets.length === 0) {
+      return {
+        kind: "git.stage",
+        status: "warning",
+        summary: "git.stage request omitted paths.",
+        content: "Provide one or more relative paths in input.paths.",
+        nextActions: ["Retry git.stage with at least one path."],
+        artifacts: []
+      };
+    }
+    const lowerOperation = (request.input.command ?? "").trim().toLowerCase();
+    const operation = lowerOperation.includes("unstage") ? "unstage" : "stage";
+    const command = operation === "unstage"
+      ? ["restore", "--staged", "--", ...targets]
+      : ["add", "--", ...targets];
+
+    const result = await executeCommand("git", command, this.workdir, this.config.execution.timeoutMs);
+    return {
+      kind: "git.stage",
+      status: result.exitCode === 0 ? "success" : "warning",
+      summary: result.exitCode === 0
+        ? `git.stage ${operation} completed for ${targets.length} file(s).`
+        : `git.stage ${operation} failed for ${targets.length} file(s).`,
+      content: [result.stdout, result.stderr].filter(Boolean).join("\n").trim() || `(exit ${result.exitCode})`,
+      nextActions: result.exitCode === 0
+        ? []
+        : ["Check requested paths and repository state, then retry git.stage."],
+      artifacts: []
+    };
+  }
+
+  private async executeGitCommitTool(request: TaskToolRequest): Promise<TaskObservation> {
+    const commitMessage = (request.input.query ?? request.input.command ?? "work-item update").trim().replaceAll("\n", " ");
+    const safeMessage = commitMessage.length === 0 ? "work-item update" : commitMessage;
+    if (!safeMessage) {
+      return {
+        kind: "git.commit",
+        status: "warning",
+        summary: "git.commit request missing message.",
+        content: "Provide a commit message in input.query or input.command.",
+        nextActions: ["Retry git.commit with a short commit message."],
+        artifacts: []
+      };
+    }
+
+    const result = await executeCommand("git", ["commit", "-m", safeMessage, "--allow-empty"], this.workdir, this.config.execution.timeoutMs);
+    return {
+      kind: "git.commit",
+      status: result.exitCode === 0 ? "success" : "warning",
+      summary: result.exitCode === 0 ? `git.commit recorded: ${safeMessage}` : "git.commit failed",
+      content: [result.stdout, result.stderr].filter(Boolean).join("\n").trim() || `(exit ${result.exitCode})`,
+      nextActions: result.exitCode === 0
+        ? ["Review commit output before moving to the next task."]
+        : ["Check git status/diff and retry git.commit with a valid message."],
+      artifacts: []
+    };
+  }
+
+  private async executeBrowserVerifyTool(input: TaskToolRequest["input"]): Promise<TaskObservation> {
+    const endpoint = (input.query ?? input.command ?? "").trim();
+    if (!endpoint) {
+      return {
+        kind: "browser.verify",
+        status: "warning",
+        summary: "browser.verify request omitted target endpoint.",
+        content: "Provide a URL in input.query or input.command.",
+        nextActions: ["Retry browser.verify with a full http:// or https:// URL."],
+        artifacts: []
+      };
+    }
+    const marker = input.command?.trim() && input.command !== endpoint ? input.command.trim() : "";
+    if (!this.isSafeHttpUrl(endpoint)) {
+      return {
+        kind: "browser.verify",
+        status: "error",
+        summary: "browser.verify endpoint is invalid.",
+        content: `Invalid endpoint: ${endpoint}`,
+        nextActions: ["Use a validated http:// or https:// URL string."],
+        artifacts: []
+      };
+    }
+
+    const command = `curl -fsS -m 5 ${this.shellQuote(endpoint)}`;
+    const result = await executeShell(command, this.workdir, this.config.execution.timeoutMs);
+    if (marker.length > 0 && !result.stdout.includes(marker)) {
+      return {
+        kind: "browser.verify",
+        status: "warning",
+        summary: `browser.verify executed but marker not found at ${endpoint}`,
+        content: [result.stdout, result.stderr].filter(Boolean).join("\n").trim() || `(exit ${result.exitCode})`,
+        nextActions: ["Check endpoint response and expected marker text."],
+        artifacts: []
+      };
+    }
+
+    return {
+      kind: "browser.verify",
+      status: result.exitCode === 0 ? "success" : "warning",
+      summary: result.exitCode === 0
+        ? `browser.verify returned success for ${endpoint}`
+        : `browser.verify failed for ${endpoint}`,
+      content: [result.stdout, result.stderr].filter(Boolean).join("\n").trim() || `(exit ${result.exitCode})`,
+      nextActions: result.exitCode === 0
+        ? []
+        : ["Confirm the endpoint is reachable and retry with the expected path or marker."],
+      artifacts: []
+    };
+  }
+
+  private async executeApiRequestTool(input: TaskToolRequest["input"]): Promise<TaskObservation> {
+    const request = (input.command ?? "").trim();
+    const parsed = this.parseApiRequest(request);
+    if (!parsed.ok) {
+      return {
+        kind: "api.request",
+        status: "error",
+        summary: "api.request payload is invalid.",
+        content: parsed.reason,
+        nextActions: ["Use METHOD URL format, for example: GET https://host/api/health"],
+        artifacts: []
+      };
+    }
+
+    const args = ["-fsS", "-m", "5", "-X", parsed.method, parsed.url];
+    if (parsed.body !== null) {
+      args.push("-H", "content-type: application/json", "-d", parsed.body);
+    }
+
+    const result = await executeCommand("curl", args, this.workdir, this.config.execution.timeoutMs);
+    return {
+      kind: "api.request",
+      status: result.exitCode === 0 ? "success" : "warning",
+      summary: result.exitCode === 0 ? `api.request completed: ${parsed.method} ${parsed.url}` : `api.request failed: ${parsed.method} ${parsed.url}`,
+      content: [result.stdout, result.stderr].filter(Boolean).join("\n").trim() || `(exit ${result.exitCode})`,
+      nextActions: result.exitCode === 0
+        ? []
+        : ["Check request parameters and retry with a valid method/url."],
+      artifacts: []
+    };
+  }
+
+  private async executeDatabaseQueryTool(input: TaskToolRequest["input"]): Promise<TaskObservation> {
+    const query = (input.query ?? "").trim();
+    const databasePath = (input.paths ?? [""])[0]?.trim();
+    if (!databasePath || databasePath.length === 0 || query.length === 0) {
+      return {
+        kind: "database.query",
+        status: "warning",
+        summary: "database.query request omitted file or query.",
+        content: "Provide database file path in input.paths[0] and query text in input.query.",
+        nextActions: ["Retry database.query with both a target file and a query string."],
+        artifacts: []
+      };
+    }
+
+    if (!existsSync(resolve(this.workdir, databasePath))) {
+      return {
+        kind: "database.query",
+        status: "error",
+        summary: "database.query target file does not exist.",
+        content: `Missing path: ${databasePath}`,
+        nextActions: ["Use an existing local file path relative to the workdir."],
+        artifacts: []
+      };
+    }
+
+    try {
+      const raw = await readFile(resolve(this.workdir, databasePath), "utf8");
+      const data = JSON.parse(raw);
+      if (!Array.isArray(data)) {
+        return {
+          kind: "database.query",
+          status: "warning",
+          summary: "database.query only supports array JSON payloads today.",
+          content: `Loaded ${databasePath} but top-level value was not an array.`,
+          nextActions: ["Use a JSON array file for database.query demonstrations in this phase."],
+          artifacts: []
+        };
+      }
+
+      const normalizedQuery = query.toLowerCase();
+      if (normalizedQuery === "count" || normalizedQuery === "count(*)") {
+        return {
+          kind: "database.query",
+          status: "success",
+          summary: `database.query counted ${data.length} rows from ${databasePath}`,
+          content: JSON.stringify({ count: data.length }),
+          nextActions: [],
+          artifacts: []
+        };
+      }
+
+      const whereMatch = query.match(/^where\s+([a-z0-9_]+)\s*=\s*([^\s].*)$/i);
+      if (!whereMatch) {
+        return {
+          kind: "database.query",
+          status: "warning",
+          summary: "database.query only supports `where <field>=<value>` or `count(*)` in this phase.",
+          content: `Unsupported query: ${query}`,
+          nextActions: ["Use count(*) or where filters such as `where status=ready`."],
+          artifacts: []
+        };
+      }
+
+      const field = whereMatch[1] ?? "";
+      const expected = (whereMatch[2] ?? "").replace(/^['"]|['"]$/g, "");
+      const matched = data.filter((row) => {
+        if (row && typeof row === "object" && field in row) {
+          return String((row as Record<string, unknown>)[field]) === expected;
+        }
+        return false;
+      });
+      return {
+        kind: "database.query",
+        status: "success",
+        summary: `database.query matched ${matched.length} row(s) in ${databasePath}`,
+        content: JSON.stringify(matched),
+        nextActions: [],
+        artifacts: []
+      };
+    } catch (error) {
+      return {
+        kind: "database.query",
+        status: "error",
+        summary: "database.query execution failed.",
+        content: `[database query failed: ${(error as Error).message}]`,
+        nextActions: ["Verify the JSON file and query string format."],
+        artifacts: []
+      };
+    }
+  }
+
+  private validateCommandShape(command: string): { ok: boolean; reason: string } {
+    if (/[;&|]|\$\(|\`/.test(command)) {
+      return { ok: false, reason: "disallowed shell metacharacters" };
+    }
+
+    const parts = this.splitSafeShellArguments(command);
+    if (parts.length === 0) {
+      return { ok: false, reason: "empty command parts" };
+    }
+
+    const allowed = [
+      "cat",
+      "echo",
+      "find",
+      "git",
+      "ls",
+      "mkdir",
+      "npm",
+      "node",
+      "pwd",
+      "printf",
+      "rm",
+      "sed",
+      "tail",
+      "test",
+      "touch",
+      "true",
+      "head"
+    ];
+    if (!allowed.includes(parts[0]?.toLowerCase() ?? "")) {
+      return { ok: false, reason: `command ${parts[0]} is not in allowed shell set` };
+    }
+
+    return { ok: true, reason: "ok" };
+  }
+
+  private normalizePackageInstallCommand(command: string): string | null {
+    const trimmed = command.trim();
+    if (!/^(npm|pnpm|yarn)\s+install\b/i.test(trimmed)) {
+      return null;
+    }
+    if (!/\s--dry-run(\s|$)/.test(trimmed)) {
+      return `${trimmed} --dry-run`;
+    }
+    return trimmed;
+  }
+
+  private parseApiRequest(raw: string): { ok: boolean; method: string; url: string; body: string | null; reason: string } {
+    const match = /^(GET|POST|PUT|PATCH|DELETE)\s+(.+)$/i.exec(raw.trim());
+    if (!match) {
+      return { ok: false, method: "", url: "", body: null, reason: "Expected METHOD URL with optional spaces only." };
+    }
+
+    const method = (match[1] ?? "").toUpperCase();
+    const remainder = (match[2] ?? "").trim();
+    const [url, ...bodyParts] = remainder.split(" ");
+    if (!url) {
+      return { ok: false, method, url: "", body: null, reason: "Expected METHOD URL with optional spaces only." };
+    }
+    if (!this.isSafeHttpUrl(url)) {
+      return { ok: false, method, url, body: null, reason: `Unsafe URL: ${url}` };
+    }
+    const body = bodyParts.length > 0
+      ? bodyParts.join(" ").trim() || null
+      : null;
+    return { ok: true, method, url, body, reason: "ok" };
+  }
+
+  private isSafeHttpUrl(candidate: string): boolean {
+    try {
+      const parsed = new URL(candidate);
+      return parsed.protocol === "http:" || parsed.protocol === "https:";
+    } catch {
+      return false;
+    }
+  }
+
+  private splitSafeShellArguments(value: string): string[] {
+    const match = value.match(/(?:"([^"]*)"|'([^']*)'|([^\s]+))/g);
+    if (!match) {
+      return [];
+    }
+    return match.map((token) => token.replace(/^['"]|['"]$/g, ""));
+  }
+
+  private shellQuote(value: string): string {
+    return `'${value.replaceAll("'", "'\"'\"'")}'`;
   }
 
   private async writeTaskToolTurnsArtifact(
