@@ -162,3 +162,10 @@ export const qaSchema = z.object({
   verifiedCriteria: stringListSchema.default([]),
   failedCriteria: stringListSchema.default([])
 });
+
+export const reviewSchema = z.object({
+  verdict: z.enum(["clean", "issues_found"]),
+  summary: z.string().min(1),
+  findings: z.array(qaIssueSchema).default([]),
+  strengths: stringListSchema.default([])
+});

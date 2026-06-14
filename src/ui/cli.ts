@@ -4,6 +4,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { loadConfigWithOptionalProfile } from "../config/profile.js";
 import { collectRunMetrics, summarizeBench } from "../core/metrics.js";
+import { runReview } from "../core/reviewer.js";
 import { Runner } from "../core/runner.js";
 import { StateStore } from "../state/store.js";
 import { runTui } from "./tui.js";
@@ -14,7 +15,7 @@ export function buildCli(): Command {
   program
     .name("openmythos")
     .description("Deterministic multi-model orchestration harness")
-    .version("0.2.0");
+    .version("0.3.0");
 
   program.command("run")
     .argument("<goal>", "Goal to execute")
@@ -127,6 +128,47 @@ export function buildCli(): Command {
       }, null, 2));
     });
 
+  program.command("review")
+    .description("Review local git changes and emit structured findings")
+    .option("-c, --config <path>", "Config file", "openmythos.config.json")
+    .option("-p, --profile <nameOrPath>", "Config profile overlay")
+    .option("-w, --workdir <path>", "Target working directory", ".")
+    .option("--cached", "Review staged changes instead of unstaged tracked changes")
+    .option("--base <rev>", "Review diff from a base revision")
+    .option("--head <rev>", "Review diff to a head revision")
+    .option("-o, --output-dir <path>", "Directory for review artifacts", "reviews")
+    .action(async (options: {
+      config: string;
+      profile?: string;
+      workdir: string;
+      cached?: boolean;
+      base?: string;
+      head?: string;
+      outputDir: string;
+    }) => {
+      const { config } = await runtime(options.config, options.workdir, options.profile);
+      const review = await runReview(config, options.workdir, {
+        ...(options.cached ? { cached: true } : {}),
+        ...(options.base ? { base: options.base } : {}),
+        ...(options.head ? { head: options.head } : {}),
+        outputDir: options.outputDir
+      });
+      console.log(JSON.stringify({
+        repoRoot: review.input.repoRoot,
+        verdict: review.result.verdict,
+        summary: review.result.summary,
+        findingCount: review.result.findings.length,
+        changedFiles: review.input.changedFiles.map((file) => ({
+          path: file.path,
+          status: file.status
+        })),
+        artifacts: review.artifacts
+      }, null, 2));
+      if (review.result.verdict === "issues_found") {
+        process.exitCode = 1;
+      }
+    });
+
   program.command("tui")
     .description("Open a terminal dashboard for run state and events")
     .option("-w, --workdir <path>", "Target working directory", ".")
@@ -139,7 +181,7 @@ export function buildCli(): Command {
   return program;
 }
 
-async function runtime(configPath: string, workdirPath: string, profile?: string): Promise<{ runner: Runner; store: StateStore }> {
+async function runtime(configPath: string, workdirPath: string, profile?: string): Promise<{ runner: Runner; store: StateStore; config: Awaited<ReturnType<typeof loadConfigWithOptionalProfile>> }> {
   const configFile = resolve(configPath);
   if (!existsSync(configFile)) {
     throw new Error(`Config file not found: ${configFile}`);
@@ -147,7 +189,7 @@ async function runtime(configPath: string, workdirPath: string, profile?: string
   const config = await loadConfigWithOptionalProfile(configFile, profile);
   const workdir = resolve(workdirPath || config.execution.workingDirectory);
   const store = new StateStore(resolve(workdir, "runs"));
-  return { runner: new Runner(config, store, workdir), store };
+  return { runner: new Runner(config, store, workdir), store, config };
 }
 
 function parsePositiveInt(value: string): number {

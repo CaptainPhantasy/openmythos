@@ -91,6 +91,13 @@ export interface QaResult {
   failedCriteria: string[];
 }
 
+export interface ReviewResult {
+  verdict: "clean" | "issues_found";
+  summary: string;
+  findings: QaIssue[];
+  strengths: string[];
+}
+
 export interface AdapterMessage {
   role: "user" | "assistant";
   content: string;

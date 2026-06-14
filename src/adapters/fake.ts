@@ -94,6 +94,15 @@ export class FakeAdapter implements ModelAdapter {
       };
     }
 
+    if (request.system.includes("deterministic code review engine")) {
+      return {
+        verdict: "clean",
+        summary: "No material issues found in the reviewed local changes.",
+        findings: [],
+        strengths: ["Structured diff and file snapshots were provided."]
+      };
+    }
+
     return {};
   }
 }

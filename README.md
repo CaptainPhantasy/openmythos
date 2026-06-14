@@ -31,6 +31,7 @@ exhausted.
 - Patch-safe file edits plus review artifacts before apply.
 - Approval policy for risky file actions before apply.
 - Local verification commands before model QA.
+- Structured `review` command for local git diffs with machine-readable findings.
 - Adapter profiles for fake, Z.AI GLM coding, and frontier model experiments.
 - Retained `metrics.json` artifacts and benchmark aggregation with `bench`.
 - Consecutive-round eval command for proving harness stability.
@@ -157,6 +158,14 @@ node dist/index.js bench --workdir .
 node dist/index.js bench --workdir runs/evals
 ```
 
+Review local changes:
+
+```bash
+node dist/index.js review
+node dist/index.js review --cached
+node dist/index.js review --base origin/main --head HEAD
+```
+
 Approval policy:
 
 - `approval.mode = "suggest"` writes per-task review artifacts without blocking.
@@ -182,6 +191,11 @@ Each run writes an inspectable artifact set:
 - `final.md`: final execution report.
 - `*-invalid-attempt-*.txt`: raw invalid model responses saved during bounded
   JSON repair.
+
+Local review writes artifact pairs under `reviews/` by default:
+
+- `review-*.json`: structured review input and findings.
+- `review-*.md`: human-readable review report.
 
 Plan task contract:
 
