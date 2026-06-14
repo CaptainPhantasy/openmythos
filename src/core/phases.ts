@@ -121,15 +121,15 @@ export class PhaseExecutor {
 
     for (const batch of batches) {
       const batchOutputs = await Promise.all(batch.map(async (task) => {
-        const output = await this.executeTask(task, plan, snippets, outputs);
+        const execution = await this.executeTask(task, plan, snippets, outputs);
         const review = await createReviewBundle(
           this.workdir,
           this.runDir,
           task.id,
-          output.fileEdits,
+          execution.output.fileEdits,
           this.config.approval
         );
-        return { task, output, review };
+        return { task, execution, review };
       }));
 
       for (const item of batchOutputs) {
@@ -140,9 +140,16 @@ export class PhaseExecutor {
       }
 
       for (const item of batchOutputs) {
-        await applyFileEdits(this.workdir, item.output.fileEdits, this.runDir);
-        this.taskReceipts.push(await this.buildTaskReceipt(item.task, item.output, item.review, item.task.role));
-        outputs.push(item.output);
+        await applyFileEdits(this.workdir, item.execution.output.fileEdits, this.runDir);
+        this.taskReceipts.push(await this.buildTaskReceipt(
+          item.task,
+          item.execution.output,
+          item.review,
+          item.execution.executorKind,
+          item.execution.executorRole,
+          item.execution.verificationResults
+        ));
+        outputs.push(item.execution.output);
       }
     }
 
@@ -280,7 +287,16 @@ export class PhaseExecutor {
     plan: Plan,
     snippets: string,
     priorOutputs: TaskOutput[]
-  ): Promise<TaskOutput> {
+  ): Promise<{
+    output: TaskOutput;
+    executorKind: PlanTask["executor"];
+    executorRole: Extract<PlanTask["role"], "coder" | "critic" | "verifier">;
+    verificationResults?: CommandReceipt[];
+  }> {
+    if (task.executor === "harness") {
+      return this.executeHarnessTask(task);
+    }
+
     const role = task.role;
     const currentFileState: Record<string, string> = {};
     for (const file of task.fileTargets) {
@@ -291,7 +307,7 @@ export class PhaseExecutor {
       }
     }
     const model = this.config.models[role];
-    return await this.callJson(role, `execute-${task.id}`, {
+    const output = await this.callJson(role, `execute-${task.id}`, {
       system: role === "critic"
         ? CRITIC_SYSTEM
         : role === "verifier"
@@ -305,33 +321,64 @@ export class PhaseExecutor {
         content: `Task:\n${JSON.stringify(task, null, 2)}\n\nSuccess criteria:\n${plan.successCriteria.map((criterion) => `- ${criterion}`).join("\n")}\n\nRelevant snippets:\n${snippets}\n\nCurrent file state:\n${JSON.stringify(currentFileState, null, 2)}\n\nPrior outputs:\n${JSON.stringify(priorOutputs, null, 2)}`
       }]
     }, taskOutputSchema) as TaskOutput;
+
+    return {
+      output,
+      executorKind: "model",
+      executorRole: role
+    };
+  }
+
+  private async executeHarnessTask(
+    task: PlanTask
+  ): Promise<{
+    output: TaskOutput;
+    executorKind: "harness";
+    executorRole: "verifier";
+    verificationResults: CommandReceipt[];
+  }> {
+    const verificationResults = await this.runVerificationCommands(task.verificationCommands);
+    const failures = verificationResults.filter((result) => result.exitCode !== 0);
+
+    return {
+      output: {
+        taskId: task.id,
+        status: failures.length === 0 ? "success" : "failed",
+        fileEdits: [],
+        summary: failures.length === 0
+          ? `Harness executed ${verificationResults.length} deterministic verification command(s) for ${task.id}.`
+          : `Harness execution found ${failures.length} failing verification command(s) for ${task.id}.`,
+        errors: failures.map((result) => `Verification command failed: ${result.command}`)
+      },
+      executorKind: "harness",
+      executorRole: "verifier",
+      verificationResults
+    };
   }
 
   private async buildTaskReceipt(
     task: PlanTask,
     output: TaskOutput,
     review: ReviewBundle,
-    executorRole: Extract<PlanTask["role"], "coder" | "critic" | "verifier">
+    executorKind: PlanTask["executor"],
+    executorRole: Extract<PlanTask["role"], "coder" | "critic" | "verifier">,
+    precomputedVerificationResults?: CommandReceipt[]
   ): Promise<TaskExecutionReceipt> {
-    const verificationResults: CommandReceipt[] = [];
-    for (const command of task.verificationCommands) {
-      const result = await executeShell(command, this.workdir, this.config.execution.timeoutMs);
-      verificationResults.push({
-        command: result.command,
-        exitCode: result.exitCode,
-        stdout: result.stdout,
-        stderr: result.stderr,
-        durationMs: result.durationMs
-      });
-    }
+    const verificationResults = precomputedVerificationResults ?? await this.runVerificationCommands(task.verificationCommands);
+    const actionSummary = output.fileEdits.length > 0
+      ? `Applied edits for ${task.id}`
+      : executorKind === "harness"
+        ? `Executed harness task ${task.id}`
+        : `Executed task ${task.id}`;
 
     const failingResults = verificationResults.filter((result) => result.exitCode !== 0);
     if (failingResults.length > 0) {
       return {
         taskId: task.id,
+        executorKind,
         executorRole,
         status: "error",
-        summary: `Applied edits for ${task.id}, but ${failingResults.length} task verification command(s) failed.`,
+        summary: `${actionSummary}, but ${failingResults.length} task verification command(s) failed.`,
         requiredTools: task.requiredTools,
         verificationCommands: task.verificationCommands,
         verificationResults,
@@ -343,9 +390,10 @@ export class PhaseExecutor {
     if (task.verificationCommands.length === 0) {
       return {
         taskId: task.id,
+        executorKind,
         executorRole,
         status: "warning",
-        summary: `Applied edits for ${task.id}, but no task-level verification commands were provided.`,
+        summary: `${actionSummary}, but no task-level verification commands were provided.`,
         requiredTools: task.requiredTools,
         verificationCommands: [],
         verificationResults: [],
@@ -356,15 +404,31 @@ export class PhaseExecutor {
 
     return {
       taskId: task.id,
+      executorKind,
       executorRole,
       status: "success",
-      summary: `Applied edits for ${task.id} and passed all task-level verification commands.`,
+      summary: `${actionSummary} and passed all task-level verification commands.`,
       requiredTools: task.requiredTools,
       verificationCommands: task.verificationCommands,
       verificationResults,
       artifacts: [...output.fileEdits.map((edit) => edit.path), review.reviewPath, review.patchPath],
       nextActions: []
     };
+  }
+
+  private async runVerificationCommands(commands: string[]): Promise<CommandReceipt[]> {
+    const verificationResults: CommandReceipt[] = [];
+    for (const command of commands) {
+      const result = await executeShell(command, this.workdir, this.config.execution.timeoutMs);
+      verificationResults.push({
+        command: result.command,
+        exitCode: result.exitCode,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        durationMs: result.durationMs
+      });
+    }
+    return verificationResults;
   }
 
   private recordModelUsage(

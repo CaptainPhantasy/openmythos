@@ -10,7 +10,7 @@ export interface ToolValidationIssue {
   taskId: string;
   tool: string;
   normalizedTool?: string;
-  reason: "unsupported" | "role_mismatch";
+  reason: "unsupported" | "role_mismatch" | "executor_mismatch";
   role: PlanTask["role"];
 }
 
@@ -93,6 +93,15 @@ const aliasMap: Record<string, string> = {
 };
 
 const catalogById = new Map(toolCatalog.map((tool) => [tool.id, tool]));
+const harnessOnlyTools = new Set([
+  "filesystem.read",
+  "verification.command",
+  "review.inspect",
+  "git.status",
+  "git.diff",
+  "git.issue_view",
+  "git.pr_view"
+]);
 
 export function supportedTools(): ToolDefinition[] {
   return toolCatalog.map((tool) => ({ ...tool, roles: [...tool.roles] }));
@@ -138,6 +147,38 @@ export function normalizePlanTools(plan: Plan): { plan: Plan; issues: ToolValida
       requiredTools: [...new Set(normalizedTools)]
     };
   });
+
+  for (const task of tasks) {
+    if (task.executor !== "harness") {
+      continue;
+    }
+    if (task.role !== "verifier") {
+      issues.push({
+        taskId: task.id,
+        tool: "executor:harness",
+        reason: "executor_mismatch",
+        role: task.role
+      });
+    }
+    if (task.verificationCommands.length === 0) {
+      issues.push({
+        taskId: task.id,
+        tool: "verificationCommands",
+        reason: "executor_mismatch",
+        role: task.role
+      });
+    }
+    for (const tool of task.requiredTools) {
+      if (!harnessOnlyTools.has(tool)) {
+        issues.push({
+          taskId: task.id,
+          tool,
+          reason: "executor_mismatch",
+          role: task.role
+        });
+      }
+    }
+  }
 
   return {
     plan: {

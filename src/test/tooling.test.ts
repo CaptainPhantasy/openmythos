@@ -13,6 +13,7 @@ test("normalizePlanTools maps common aliases onto supported tool ids", () => {
       title: "Alias",
       description: "Alias",
       role: "coder",
+      executor: "model",
       fileTargets: ["file.txt"],
       acceptanceCriteria: ["done"],
       requiredTools: ["write", "bash", "write"],
@@ -36,6 +37,7 @@ test("normalizePlanTools reports unsupported tools and role mismatches", () => {
       title: "Mismatch",
       description: "Mismatch",
       role: "critic",
+      executor: "model",
       fileTargets: [],
       acceptanceCriteria: ["done"],
       requiredTools: ["deploy.prod", "shell.run"],
@@ -49,4 +51,27 @@ test("normalizePlanTools reports unsupported tools and role mismatches", () => {
     normalized.issues.map((issue) => issue.reason),
     ["unsupported", "role_mismatch"]
   );
+});
+
+test("normalizePlanTools rejects invalid harness executors", () => {
+  const plan: Plan = {
+    goal: "Harness mismatch",
+    dependencies: {},
+    successCriteria: ["done"],
+    tasks: [{
+      id: "task-1",
+      title: "Harness mismatch",
+      description: "Harness mismatch",
+      role: "coder",
+      executor: "harness",
+      fileTargets: [],
+      acceptanceCriteria: ["done"],
+      requiredTools: ["filesystem.write"],
+      verificationCommands: [],
+      executionMode: "serial"
+    }]
+  };
+
+  const normalized = normalizePlanTools(plan);
+  assert.ok(normalized.issues.some((issue) => issue.reason === "executor_mismatch"));
 });

@@ -46,6 +46,8 @@ export interface RunMetrics {
   phaseCount: number;
   contextFileCount: number;
   taskCount: number;
+  modelTaskCount: number;
+  harnessTaskCount: number;
   fileEditCount: number;
   patchEditCount: number;
   deleteEditCount: number;

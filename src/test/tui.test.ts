@@ -41,6 +41,8 @@ test("renderDashboard displays run and recent event state", () => {
       phaseCount: 6,
       contextFileCount: 2,
       taskCount: 1,
+      modelTaskCount: 1,
+      harnessTaskCount: 0,
       fileEditCount: 1,
       patchEditCount: 0,
       deleteEditCount: 0,
@@ -72,6 +74,8 @@ test("renderDashboard displays run and recent event state", () => {
       phaseCount: 6,
       contextFileCount: 2,
       taskCount: 1,
+      modelTaskCount: 1,
+      harnessTaskCount: 0,
       fileEditCount: 1,
       patchEditCount: 0,
       deleteEditCount: 0,
@@ -108,6 +112,7 @@ test("renderDashboard displays run and recent event state", () => {
   assert.match(output, /OpenMythos TUI/);
   assert.match(output, /Bench Summary/);
   assert.match(output, /run-1 completed/);
+  assert.match(output, /task_routes: model=1 harness=0/);
   assert.match(output, /model usage:/);
   assert.match(output, /metrics\.json/);
   assert.match(output, /QA passed=true/);

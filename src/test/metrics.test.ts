@@ -19,6 +19,8 @@ test("summarizeBench aggregates retained run metrics", () => {
       phaseCount: 6,
       contextFileCount: 3,
       taskCount: 2,
+      modelTaskCount: 2,
+      harnessTaskCount: 0,
       fileEditCount: 4,
       patchEditCount: 1,
       deleteEditCount: 0,
@@ -45,6 +47,8 @@ test("summarizeBench aggregates retained run metrics", () => {
       phaseCount: 5,
       contextFileCount: 4,
       taskCount: 3,
+      modelTaskCount: 2,
+      harnessTaskCount: 1,
       fileEditCount: 2,
       patchEditCount: 0,
       deleteEditCount: 1,
@@ -70,6 +74,8 @@ test("summarizeBench aggregates retained run metrics", () => {
   assert.equal(summary.averageQaScore, 70);
   assert.equal(summary.totalInputTokens, 130);
   assert.equal(summary.totalPatchEdits, 1);
+  assert.equal(summary.totalModelTaskCount, 4);
+  assert.equal(summary.totalHarnessTaskCount, 1);
   assert.equal(summary.totalTaskVerificationCount, 3);
   assert.equal(summary.totalTaskVerificationFailures, 1);
 });
@@ -89,6 +95,8 @@ test("collectRunMetrics finds metrics artifacts under eval-style nested roots", 
     phaseCount: 6,
     contextFileCount: 1,
     taskCount: 1,
+    modelTaskCount: 1,
+    harnessTaskCount: 0,
     fileEditCount: 1,
     patchEditCount: 0,
     deleteEditCount: 0,

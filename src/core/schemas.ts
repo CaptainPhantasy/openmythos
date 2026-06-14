@@ -111,6 +111,7 @@ export const planTaskSchema = z.object({
   title: z.string().min(1),
   description: z.string().min(1),
   role: z.enum(["coder", "critic", "verifier"]),
+  executor: z.enum(["model", "harness"]).default("model"),
   fileTargets: stringListSchema.default([]),
   acceptanceCriteria: stringListSchema.refine((items) => items.length > 0, "Expected at least one acceptance criterion"),
   requiredTools: stringListSchema.default([]),

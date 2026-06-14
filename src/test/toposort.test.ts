@@ -4,8 +4,8 @@ import { buildExecutionBatches, sortTasks } from "../core/toposort.js";
 import type { PlanTask } from "../core/types.js";
 
 const tasks: PlanTask[] = [
-  { id: "b", title: "B", description: "B", role: "coder", fileTargets: [], acceptanceCriteria: ["b"], requiredTools: [], verificationCommands: [], executionMode: "serial" },
-  { id: "a", title: "A", description: "A", role: "coder", fileTargets: [], acceptanceCriteria: ["a"], requiredTools: [], verificationCommands: [], executionMode: "serial" }
+  { id: "b", title: "B", description: "B", role: "coder", executor: "model", fileTargets: [], acceptanceCriteria: ["b"], requiredTools: [], verificationCommands: [], executionMode: "serial" },
+  { id: "a", title: "A", description: "A", role: "coder", executor: "model", fileTargets: [], acceptanceCriteria: ["a"], requiredTools: [], verificationCommands: [], executionMode: "serial" }
 ];
 
 test("sortTasks orders dependencies before dependents", () => {
@@ -18,10 +18,10 @@ test("sortTasks rejects cycles", () => {
 
 test("buildExecutionBatches groups dependency-free parallel tasks and isolates conflicting or serial tasks", () => {
   const planned: PlanTask[] = [
-    { id: "a", title: "A", description: "A", role: "coder", fileTargets: ["src/a.ts"], acceptanceCriteria: ["a"], requiredTools: ["filesystem.read"], verificationCommands: [], executionMode: "parallel" },
-    { id: "b", title: "B", description: "B", role: "coder", fileTargets: ["src/b.ts"], acceptanceCriteria: ["b"], requiredTools: ["filesystem.read"], verificationCommands: [], executionMode: "parallel" },
-    { id: "c", title: "C", description: "C", role: "coder", fileTargets: ["src/a.ts"], acceptanceCriteria: ["c"], requiredTools: ["filesystem.write"], verificationCommands: [], executionMode: "parallel" },
-    { id: "d", title: "D", description: "D", role: "critic", fileTargets: [], acceptanceCriteria: ["d"], requiredTools: ["review"], verificationCommands: [], executionMode: "serial" }
+    { id: "a", title: "A", description: "A", role: "coder", executor: "model", fileTargets: ["src/a.ts"], acceptanceCriteria: ["a"], requiredTools: ["filesystem.read"], verificationCommands: [], executionMode: "parallel" },
+    { id: "b", title: "B", description: "B", role: "coder", executor: "model", fileTargets: ["src/b.ts"], acceptanceCriteria: ["b"], requiredTools: ["filesystem.read"], verificationCommands: [], executionMode: "parallel" },
+    { id: "c", title: "C", description: "C", role: "coder", executor: "model", fileTargets: ["src/a.ts"], acceptanceCriteria: ["c"], requiredTools: ["filesystem.write"], verificationCommands: [], executionMode: "parallel" },
+    { id: "d", title: "D", description: "D", role: "critic", executor: "model", fileTargets: [], acceptanceCriteria: ["d"], requiredTools: ["review"], verificationCommands: [], executionMode: "serial" }
   ];
 
   const batches = buildExecutionBatches(planned, {});

@@ -94,18 +94,48 @@ test("Runner routes verifier tasks through the verifier execution lane", async (
   const result = await runner.run("verifier task routing");
   const execution = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "execution.json"), "utf8")) as Array<{
     taskId: string;
+    executorKind: string;
     executorRole: string;
     status: string;
   }>;
 
   assert.equal(result.status, "completed");
   assert.deepEqual(
-    execution.map((receipt) => [receipt.taskId, receipt.executorRole, receipt.status]),
+    execution.map((receipt) => [receipt.taskId, receipt.executorKind, receipt.executorRole, receipt.status]),
     [
-      ["task-1", "coder", "success"],
-      ["task-2", "verifier", "success"]
+      ["task-1", "model", "coder", "success"],
+      ["task-2", "model", "verifier", "success"]
     ]
   );
+});
+
+test("Runner can execute verifier tasks on the harness executor path", async () => {
+  const workdir = await mkdtemp(join(tmpdir(), "openmythos-fake-harness-route-"));
+  const config = await loadConfigWithOptionalProfile(resolve("openmythos.config.json"), "fake");
+  const runner = new Runner(config, new StateStore(resolve(workdir, "runs")), workdir);
+
+  const result = await runner.run("harness task execution");
+  const execution = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "execution.json"), "utf8")) as Array<{
+    taskId: string;
+    executorKind: string;
+    executorRole: string;
+    status: string;
+  }>;
+  const metrics = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "metrics.json"), "utf8")) as {
+    modelTaskCount: number;
+    harnessTaskCount: number;
+  };
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(
+    execution.map((receipt) => [receipt.taskId, receipt.executorKind, receipt.executorRole, receipt.status]),
+    [
+      ["task-1", "model", "coder", "success"],
+      ["task-2", "harness", "verifier", "success"]
+    ]
+  );
+  assert.equal(metrics.modelTaskCount, 1);
+  assert.equal(metrics.harnessTaskCount, 1);
 });
 
 test("Runner can stop in awaiting_approval before applying risky edits", async () => {

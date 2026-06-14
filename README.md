@@ -1,3 +1,5 @@
+![OpenMythos social preview](assets/openmythos-social.png)
+
 # OpenMythos
 
 OpenMythos is a deterministic multi-model orchestration harness for agentic
@@ -244,10 +246,12 @@ Local review writes artifact pairs under `reviews/` by default:
 
 Plan task contract:
 
-- planners can now specify `requiredTools` and `executionMode`
+- planners can now specify `requiredTools`, `executor`, and `executionMode`
 - planners can specify `verificationCommands` for task-level local evidence
 - `requiredTools` are normalized against a deterministic harness catalog and
   repaired or rejected when they reference unsupported or role-mismatched tools
+- planners can set `executor = "harness"` for read-only verifier work so the
+  harness can execute deterministic verification tasks without a model call
 - task roles are now routed through matching worker lanes, including
   task-level `verifier` execution before the final QA gate
 - the harness can batch dependency-free tasks when they are marked

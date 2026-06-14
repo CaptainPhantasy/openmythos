@@ -31,6 +31,7 @@ export interface PlanTask {
   title: string;
   description: string;
   role: Extract<ModelRole, "coder" | "critic" | "verifier">;
+  executor: "model" | "harness";
   fileTargets: string[];
   acceptanceCriteria: string[];
   requiredTools: string[];
@@ -48,6 +49,7 @@ export interface CommandReceipt {
 
 export interface TaskExecutionReceipt {
   taskId: string;
+  executorKind: PlanTask["executor"];
   executorRole: Extract<ModelRole, "coder" | "critic" | "verifier">;
   status: "success" | "warning" | "error";
   summary: string;

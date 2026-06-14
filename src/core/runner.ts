@@ -298,6 +298,7 @@ export class Runner {
       context,
       plan,
       outputs,
+      taskReceipts: executor.snapshotTaskReceipts(),
       qa,
       reviews: executor.snapshotReviews(),
       verification: executor.verificationMetrics(),

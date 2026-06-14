@@ -1,7 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import type { ContextResult, Plan, QaResult, ReviewBundle, TaskOutput } from "./types.js";
+import type { ContextResult, Plan, QaResult, ReviewBundle, TaskExecutionReceipt, TaskOutput } from "./types.js";
 import type { ModelUsageMetric, RunMetrics, RunState } from "../state/types.js";
 
 export interface VerificationMetrics {
@@ -16,6 +16,7 @@ export function buildRunMetrics(input: {
   context: ContextResult | null;
   plan: Plan | null;
   outputs: TaskOutput[] | null;
+  taskReceipts: TaskExecutionReceipt[];
   qa: QaResult | null;
   reviews: ReviewBundle[];
   verification: VerificationMetrics;
@@ -36,6 +37,8 @@ export function buildRunMetrics(input: {
     phaseCount: input.state.phasesCompleted.length,
     contextFileCount: input.context?.fileManifest.length ?? 0,
     taskCount: input.plan?.tasks.length ?? 0,
+    modelTaskCount: input.taskReceipts.filter((receipt) => receipt.executorKind === "model").length,
+    harnessTaskCount: input.taskReceipts.filter((receipt) => receipt.executorKind === "harness").length,
     fileEditCount: outputs.reduce((sum, output) => sum + output.fileEdits.length, 0),
     patchEditCount: outputs.reduce((sum, output) => sum + output.fileEdits.filter((edit) => edit.action === "patch").length, 0),
     deleteEditCount: outputs.reduce((sum, output) => sum + output.fileEdits.filter((edit) => edit.action === "delete").length, 0),
@@ -63,6 +66,8 @@ export interface BenchmarkSummary {
   totalModelCalls: number;
   totalFileEdits: number;
   totalPatchEdits: number;
+  totalModelTaskCount: number;
+  totalHarnessTaskCount: number;
   totalTaskVerificationCount: number;
   totalTaskVerificationFailures: number;
 }
@@ -95,6 +100,8 @@ export function summarizeBench(metrics: RunMetrics[]): BenchmarkSummary {
     totalModelCalls: modelUsage.reduce((sum, usage) => sum + usage.calls, 0),
     totalFileEdits: metrics.reduce((sum, metric) => sum + metric.fileEditCount, 0),
     totalPatchEdits: metrics.reduce((sum, metric) => sum + metric.patchEditCount, 0),
+    totalModelTaskCount: metrics.reduce((sum, metric) => sum + metric.modelTaskCount, 0),
+    totalHarnessTaskCount: metrics.reduce((sum, metric) => sum + metric.harnessTaskCount, 0),
     totalTaskVerificationCount: metrics.reduce((sum, metric) => sum + metric.taskVerificationCount, 0),
     totalTaskVerificationFailures: metrics.reduce((sum, metric) => sum + metric.taskVerificationFailureCount, 0)
   };

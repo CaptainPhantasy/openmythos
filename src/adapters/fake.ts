@@ -41,15 +41,17 @@ export class FakeAdapter implements ModelAdapter {
       const failingVerification = request.messages.some((message) => message.content.includes("failing task verification"));
       const aliasTools = request.messages.some((message) => message.content.includes("alias tool normalization"));
       const verifierRouting = request.messages.some((message) => message.content.includes("verifier task routing"));
+      const harnessExecutor = request.messages.some((message) => message.content.includes("harness task execution"));
       return {
         goal: "deterministic fake run",
-        tasks: verifierRouting
+        tasks: (verifierRouting || harnessExecutor)
           ? [
               {
                 id: "task-1",
                 title: "Create fake output marker",
                 description: "Create a file proving the runner applied a model-provided edit.",
                 role: "coder",
+                executor: "model",
                 fileTargets: ["openmythos-fake-output.txt"],
                 requiredTools: ["filesystem.write"],
                 verificationCommands: ["test -f openmythos-fake-output.txt"],
@@ -64,6 +66,7 @@ export class FakeAdapter implements ModelAdapter {
                 title: "Verify fake output marker",
                 description: "Verify the marker file with the verifier worker.",
                 role: "verifier",
+                executor: harnessExecutor ? "harness" : "model",
                 fileTargets: ["openmythos-fake-output.txt"],
                 requiredTools: ["filesystem.read", "verification.command"],
                 verificationCommands: ["grep -qx 'OPENMYTHOS_FAKE_SUCCESS' openmythos-fake-output.txt"],
@@ -80,6 +83,7 @@ export class FakeAdapter implements ModelAdapter {
                 title: "Create fake output marker",
                 description: "Create a file proving the runner applied a model-provided edit.",
                 role: "coder",
+                executor: "model",
                 fileTargets: ["openmythos-fake-output.txt"],
                 requiredTools: aliasTools ? ["write", "bash"] : ["filesystem.write"],
                 verificationCommands: failingVerification
