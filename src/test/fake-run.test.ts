@@ -72,6 +72,20 @@ test("Runner fails when task-level verification commands fail", async () => {
   assert.match(qa.issues[0]?.description ?? "", /Task verification failed/);
 });
 
+test("Runner normalizes planner-selected tool aliases before execution", async () => {
+  const workdir = await mkdtemp(join(tmpdir(), "openmythos-fake-tool-alias-"));
+  const config = await loadConfigWithOptionalProfile(resolve("openmythos.config.json"), "fake");
+  const runner = new Runner(config, new StateStore(resolve(workdir, "runs")), workdir);
+
+  const result = await runner.run("alias tool normalization");
+  const execution = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "execution.json"), "utf8")) as Array<{
+    requiredTools: string[];
+  }>;
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(execution[0]?.requiredTools, ["filesystem.write", "shell.run"]);
+});
+
 test("Runner can stop in awaiting_approval before applying risky edits", async () => {
   const workdir = await mkdtemp(join(tmpdir(), "openmythos-fake-approval-"));
   const config = await loadConfigWithOptionalProfile(resolve("openmythos.config.json"), "fake");

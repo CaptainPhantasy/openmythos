@@ -246,8 +246,23 @@ Plan task contract:
 
 - planners can now specify `requiredTools` and `executionMode`
 - planners can specify `verificationCommands` for task-level local evidence
+- `requiredTools` are normalized against a deterministic harness catalog and
+  repaired or rejected when they reference unsupported or role-mismatched tools
 - the harness can batch dependency-free tasks when they are marked
   `executionMode = "parallel"` and do not target the same files
+
+Current supported `requiredTools` ids:
+
+- `filesystem.read`
+- `filesystem.write`
+- `filesystem.patch`
+- `shell.run`
+- `verification.command`
+- `review.inspect`
+- `git.status`
+- `git.diff`
+- `git.issue_view`
+- `git.pr_view`
 
 ## Z.AI / GLM Notes
 

@@ -18,6 +18,7 @@ import { executeShell, type ShellResult } from "../tools/shell.js";
 import { parseJsonFromModel } from "./json.js";
 import { ApprovalRequiredError, createReviewBundle } from "./review.js";
 import { contextSchema, intakeSchema, planSchema, qaSchema, taskOutputSchema } from "./schemas.js";
+import { formatToolCatalogForPrompt, normalizePlanTools, summarizeToolValidationIssues } from "./tooling.js";
 import { buildExecutionBatches } from "./toposort.js";
 import type { AdapterRequest, CommandReceipt, ContextResult, IntakeResult, Plan, PlanTask, QaResult, ReviewBundle, TaskExecutionReceipt, TaskOutput } from "./types.js";
 import type { ModelUsageMetric } from "../state/types.js";
@@ -82,16 +83,31 @@ export class PhaseExecutor {
       .map(([path, content]) => `=== ${path} ===\n${content}`)
       .join("\n\n");
     const model = this.config.models.planner;
-    return await this.callJson("planner", "plan", {
+    const buildPlanRequest = (extraNotes = "") => ({
       system: PLANNER_SYSTEM,
       maxTokens: model.maxTokens,
       temperature: model.temperature,
-      json: true,
+      json: true as const,
       messages: [{
-        role: "user",
-        content: `Goal:\n${goal}\n\nTask type: ${intake.taskType}\n\nSuccess criteria:\n${intake.successCriteria.map((criterion) => `- ${criterion}`).join("\n")}\n\nContext summary:\n${context.summary}\n\nRelevant snippets:\n${snippets}\n\n${repairNotes ? `Repair notes from failed verification:\n${repairNotes}` : ""}`
+        role: "user" as const,
+        content: `Goal:\n${goal}\n\nTask type: ${intake.taskType}\n\nSuccess criteria:\n${intake.successCriteria.map((criterion) => `- ${criterion}`).join("\n")}\n\nContext summary:\n${context.summary}\n\nRelevant snippets:\n${snippets}\n\nAvailable harness tools:\n${formatToolCatalogForPrompt()}\n\n${repairNotes ? `Repair notes from failed verification:\n${repairNotes}\n\n` : ""}${extraNotes}`
       }]
-    }, planSchema) as Plan;
+    });
+
+    let planned = await this.callJson("planner", "plan", buildPlanRequest(), planSchema) as Plan;
+    let normalized = normalizePlanTools(planned);
+    if (normalized.issues.length === 0) {
+      return normalized.plan;
+    }
+
+    const toolRepairNotes = summarizeToolValidationIssues(normalized.issues);
+    planned = await this.callJson("planner", "plan", buildPlanRequest(`Tooling corrections required:\n${toolRepairNotes}\nUse only supported tool ids, and make them compatible with the task role.`), planSchema) as Plan;
+    normalized = normalizePlanTools(planned);
+    if (normalized.issues.length > 0) {
+      throw new Error(`Plan referenced unsupported or mismatched tools after repair:\n${summarizeToolValidationIssues(normalized.issues)}`);
+    }
+
+    return normalized.plan;
   }
 
   async execute(plan: Plan, context: ContextResult): Promise<TaskOutput[]> {

@@ -39,6 +39,7 @@ export class FakeAdapter implements ModelAdapter {
 
     if (request.system.includes("create deterministic execution plans")) {
       const failingVerification = request.messages.some((message) => message.content.includes("failing task verification"));
+      const aliasTools = request.messages.some((message) => message.content.includes("alias tool normalization"));
       return {
         goal: "deterministic fake run",
         tasks: [
@@ -48,7 +49,7 @@ export class FakeAdapter implements ModelAdapter {
             description: "Create a file proving the runner applied a model-provided edit.",
             role: "coder",
             fileTargets: ["openmythos-fake-output.txt"],
-            requiredTools: ["filesystem.write"],
+            requiredTools: aliasTools ? ["write", "bash"] : ["filesystem.write"],
             verificationCommands: failingVerification
               ? ["test -f openmythos-fake-output.txt", "test -f definitely-missing-task-verification.txt"]
               : ["test -f openmythos-fake-output.txt", "grep -qx 'OPENMYTHOS_FAKE_SUCCESS' openmythos-fake-output.txt"],
