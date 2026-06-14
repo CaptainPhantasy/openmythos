@@ -481,7 +481,9 @@ export class PhaseExecutor {
             kind: "review.inspect",
             status: "warning",
             summary: "No review artifacts exist before apply.",
-            content: "Review artifacts are created after task execution when the harness evaluates proposed file edits."
+            content: "Review artifacts are created after task execution when the harness evaluates proposed file edits.",
+            nextActions: ["Inspect execution receipts after apply if you need diff-aware review evidence."],
+            artifacts: []
           });
         }
         break;
@@ -512,7 +514,9 @@ export class PhaseExecutor {
           kind: "harness.action",
           status: "error",
           summary: "Harness task is missing harnessAction.",
-          content: "The planner must provide a harnessAction for executor=harness tasks."
+          content: "The planner must provide a harnessAction for executor=harness tasks.",
+          nextActions: ["Repair the task plan so every harness task declares a supported harnessAction."],
+          artifacts: []
         });
         break;
     }
@@ -528,14 +532,18 @@ export class PhaseExecutor {
           kind: "filesystem.read",
           status: "success",
           summary: `Read ${file}`,
-          content
+          content,
+          nextActions: [],
+          artifacts: [file]
         });
       } catch (error) {
         observations.push({
           kind: "filesystem.read",
           status: "warning",
           summary: `Could not read ${file}`,
-          content: `[read failed: ${(error as Error).message}]`
+          content: `[read failed: ${(error as Error).message}]`,
+          nextActions: ["Check whether the file exists and is inside the workdir before retrying."],
+          artifacts: [file]
         });
       }
     }
@@ -681,7 +689,9 @@ export class PhaseExecutor {
           kind: request.tool,
           status: "error",
           summary: `Requested tool ${request.tool} is not allowed for ${task.id}.`,
-          content: `Allowed tools: ${task.requiredTools.join(", ")}`
+          content: `Allowed tools: ${task.requiredTools.join(", ")}`,
+          nextActions: ["Retry with one of the task's allowed tools or repair the task plan."],
+          artifacts: []
         });
         continue;
       }
@@ -694,7 +704,9 @@ export class PhaseExecutor {
               kind: "filesystem.read",
               status: "warning",
               summary: "filesystem.read request omitted paths.",
-              content: "Provide one or more relative paths in input.paths."
+              content: "Provide one or more relative paths in input.paths.",
+              nextActions: ["Retry filesystem.read with at least one relative path."],
+              artifacts: []
             });
             break;
           }
@@ -705,14 +717,18 @@ export class PhaseExecutor {
                 kind: "filesystem.read",
                 status: "success",
                 summary: `Read ${path}`,
-                content
+                content,
+                nextActions: [],
+                artifacts: [path]
               });
             } catch (error) {
               observations.push({
                 kind: "filesystem.read",
                 status: "warning",
                 summary: `Could not read ${path}`,
-                content: `[read failed: ${(error as Error).message}]`
+                content: `[read failed: ${(error as Error).message}]`,
+                nextActions: ["Check whether the requested path exists and is allowed."],
+                artifacts: [path]
               });
             }
           }
@@ -762,16 +778,29 @@ export class PhaseExecutor {
         kind: "git.status",
         status: "warning",
         summary: "Working directory is not a git repository.",
-        content: [insideRepo.stdout, insideRepo.stderr].filter(Boolean).join("\n").trim() || "git rev-parse returned a non-zero exit code."
+        content: [insideRepo.stdout, insideRepo.stderr].filter(Boolean).join("\n").trim() || "git rev-parse returned a non-zero exit code.",
+        nextActions: ["Run inside a git worktree or avoid git.status for non-repository tasks."],
+        artifacts: []
       };
     }
 
     const status = await executeShell("git status --short --branch", this.workdir, this.config.execution.timeoutMs);
+    const statusContent = [status.stdout, status.stderr].filter(Boolean).join("\n").trim();
+    const dirtyEntries = status.stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !line.startsWith("##"));
     return {
       kind: "git.status",
       status: status.exitCode === 0 ? "success" : "error",
       summary: status.exitCode === 0 ? "Captured git status." : "git status failed.",
-      content: [status.stdout, status.stderr].filter(Boolean).join("\n").trim()
+      content: statusContent,
+      nextActions: status.exitCode === 0 && dirtyEntries.length > 0
+        ? ["Inspect git.diff or review the dirty worktree before continuing."]
+        : status.exitCode === 0
+          ? []
+          : ["Check the git command output, then retry git.status."],
+      artifacts: []
     };
   }
 
@@ -782,7 +811,9 @@ export class PhaseExecutor {
         kind: "git.diff",
         status: "warning",
         summary: "Working directory is not a git repository.",
-        content: [insideRepo.stdout, insideRepo.stderr].filter(Boolean).join("\n").trim() || "git rev-parse returned a non-zero exit code."
+        content: [insideRepo.stdout, insideRepo.stderr].filter(Boolean).join("\n").trim() || "git rev-parse returned a non-zero exit code.",
+        nextActions: ["Run inside a git worktree or avoid git.diff for non-repository tasks."],
+        artifacts: []
       };
     }
 
@@ -791,7 +822,13 @@ export class PhaseExecutor {
       kind: "git.diff",
       status: diff.exitCode === 0 ? "success" : "error",
       summary: diff.exitCode === 0 ? "Captured git diff summary." : "git diff failed.",
-      content: [diff.stdout, diff.stderr].filter(Boolean).join("\n").trim() || "(no diff output)"
+      content: [diff.stdout, diff.stderr].filter(Boolean).join("\n").trim() || "(no diff output)",
+      nextActions: diff.exitCode === 0
+        ? (diff.stdout.trim().length > 0
+          ? ["Inspect the diff content before approving or expanding changes."]
+          : ["Check git.status or stage changes before retrying git.diff."])
+        : ["Check the git command output, then retry git.diff."],
+      artifacts: []
     };
   }
 
@@ -806,7 +843,9 @@ export class PhaseExecutor {
       kind,
       status: "success",
       summary: `Captured ${artifactName}.`,
-      content
+      content,
+      nextActions: [],
+      artifacts: [artifactPath]
     };
   }
 

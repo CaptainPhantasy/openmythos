@@ -121,7 +121,7 @@ test("Runner can execute verifier tasks on the harness executor path", async () 
     executorRole: string;
     harnessAction: string | null;
     status: string;
-    observations: Array<{ kind: string; status: string; content: string }>;
+    observations: Array<{ kind: string; status: string; content: string; nextActions: string[]; artifacts: string[] }>;
     artifacts: string[];
   }>;
   const metrics = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "metrics.json"), "utf8")) as {
@@ -139,6 +139,8 @@ test("Runner can execute verifier tasks on the harness executor path", async () 
   );
   assert.equal(execution[1]?.observations[0]?.kind, "filesystem.read");
   assert.match(execution[1]?.observations[0]?.content ?? "", /OPENMYTHOS_FAKE_SUCCESS/);
+  assert.deepEqual(execution[1]?.observations[0]?.nextActions, []);
+  assert.ok(execution[1]?.observations[0]?.artifacts.includes("openmythos-fake-output.txt"));
   assert.equal(execution[1]?.observations.length, 1);
   assert.ok(execution[1]?.artifacts.some((artifact) => artifact.endsWith("task-observation-task-2.json")));
   assert.equal(metrics.modelTaskCount, 1);
@@ -158,7 +160,7 @@ test("Runner dispatches git-status harness actions without file-state observatio
     executorRole: string;
     harnessAction: string | null;
     status: string;
-    observations: Array<{ kind: string; status: string; content: string }>;
+    observations: Array<{ kind: string; status: string; content: string; nextActions: string[]; artifacts: string[] }>;
   }>;
 
   assert.equal(result.status, "completed");
@@ -169,6 +171,8 @@ test("Runner dispatches git-status harness actions without file-state observatio
   assert.equal(execution[0]?.observations.length, 1);
   assert.equal(execution[0]?.observations[0]?.kind, "git.status");
   assert.equal(execution[0]?.observations[0]?.status, "warning");
+  assert.ok(execution[0]?.observations[0]?.nextActions.includes("Run inside a git worktree or avoid git.status for non-repository tasks."));
+  assert.deepEqual(execution[0]?.observations[0]?.artifacts, []);
 });
 
 test("Runner can stop in awaiting_approval before applying risky edits", async () => {
@@ -214,7 +218,7 @@ test("Runner retains task-scoped retrieval observations for model tasks", async 
   const result = await runner.run("task scoped retrieval");
   const execution = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "execution.json"), "utf8")) as Array<{
     taskId: string;
-    observations: Array<{ kind: string; status: string; content: string }>;
+    observations: Array<{ kind: string; status: string; content: string; nextActions: string[]; artifacts: string[] }>;
     artifacts: string[];
   }>;
 
@@ -222,6 +226,7 @@ test("Runner retains task-scoped retrieval observations for model tasks", async 
   assert.equal(execution[0]?.taskId, "task-1");
   assert.ok(execution[0]?.observations.some((observation) => observation.kind === "filesystem.search" && /OPENMYTHOS_FAKE_SUCCESS/.test(observation.content)));
   assert.ok(execution[0]?.observations.some((observation) => observation.kind === "code.symbols" && /locateTarget/.test(observation.content)));
+  assert.ok(execution[0]?.observations.some((observation) => observation.kind === "filesystem.search" && observation.nextActions.length > 0));
   assert.ok(execution[0]?.artifacts.some((artifact) => artifact.endsWith("task-context-task-1.json")));
 });
 
@@ -242,7 +247,7 @@ test("Runner supports bounded tool-use turns inside a model task", async () => {
     taskId: string;
     toolTurnCount: number;
     toolCallCount: number;
-    observations: Array<{ kind: string; status: string; content: string }>;
+    observations: Array<{ kind: string; status: string; content: string; nextActions: string[]; artifacts: string[] }>;
     artifacts: string[];
   }>;
   const metrics = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "metrics.json"), "utf8")) as {

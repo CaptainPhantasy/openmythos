@@ -16,7 +16,9 @@ export async function searchRepository(
       kind: "filesystem.search",
       status: "warning",
       summary: "Skipped empty repository search query.",
-      content: "The planner provided an empty context query."
+      content: "The planner provided an empty context query.",
+      nextActions: ["Provide a non-empty fixed-string query before retrying filesystem.search."],
+      artifacts: []
     };
   }
 
@@ -42,7 +44,9 @@ export async function searchRepository(
       kind: "filesystem.search",
       status: "success",
       summary: `Found ${matchCount} repository match${matchCount === 1 ? "" : "es"} for "${trimmed}".`,
-      content: truncateContent(result.stdout)
+      content: truncateContent(result.stdout),
+      nextActions: ["Use filesystem.read on the matching paths if you need full file context."],
+      artifacts: []
     };
   }
 
@@ -51,7 +55,9 @@ export async function searchRepository(
       kind: "filesystem.search",
       status: "warning",
       summary: `No repository matches found for "${trimmed}".`,
-      content: "rg returned no matches for the requested fixed-string query."
+      content: "rg returned no matches for the requested fixed-string query.",
+      nextActions: ["Refine the query text or try code.symbols for identifier-like targets."],
+      artifacts: []
     };
   }
 
@@ -59,7 +65,9 @@ export async function searchRepository(
     kind: "filesystem.search",
     status: "error",
     summary: `Repository search failed for "${trimmed}".`,
-    content: truncateContent([result.stdout, result.stderr].filter(Boolean).join("\n").trim() || `rg exited with code ${result.exitCode}.`)
+    content: truncateContent([result.stdout, result.stderr].filter(Boolean).join("\n").trim() || `rg exited with code ${result.exitCode}.`),
+    nextActions: ["Check rg availability and the workdir, then retry the search."],
+    artifacts: []
   };
 }
 
@@ -74,7 +82,9 @@ export async function findSymbolDefinitions(
       kind: "code.symbols",
       status: "warning",
       summary: `Skipped non-symbol query "${query}".`,
-      content: "Only identifier-like symbol queries are accepted for code.symbols."
+      content: "Only identifier-like symbol queries are accepted for code.symbols.",
+      nextActions: ["Provide an identifier-like query such as a function, class, or constant name."],
+      artifacts: []
     };
   }
 
@@ -107,7 +117,9 @@ export async function findSymbolDefinitions(
       kind: "code.symbols",
       status: "success",
       summary: `Found ${matchCount} likely symbol definition${matchCount === 1 ? "" : "s"} for "${symbol}".`,
-      content: truncateContent(result.stdout)
+      content: truncateContent(result.stdout),
+      nextActions: ["Use filesystem.read on the matching file if you need surrounding implementation context."],
+      artifacts: []
     };
   }
 
@@ -116,7 +128,9 @@ export async function findSymbolDefinitions(
       kind: "code.symbols",
       status: "warning",
       summary: `No likely symbol definitions found for "${symbol}".`,
-      content: "rg did not find matching declaration-like lines for the requested symbol."
+      content: "rg did not find matching declaration-like lines for the requested symbol.",
+      nextActions: ["Try filesystem.search for call sites or related string matches."],
+      artifacts: []
     };
   }
 
@@ -124,7 +138,9 @@ export async function findSymbolDefinitions(
     kind: "code.symbols",
     status: "error",
     summary: `Symbol lookup failed for "${symbol}".`,
-    content: truncateContent([result.stdout, result.stderr].filter(Boolean).join("\n").trim() || `rg exited with code ${result.exitCode}.`)
+    content: truncateContent([result.stdout, result.stderr].filter(Boolean).join("\n").trim() || `rg exited with code ${result.exitCode}.`),
+    nextActions: ["Check rg availability and the query syntax, then retry symbol lookup."],
+    artifacts: []
   };
 }
 

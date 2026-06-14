@@ -70,6 +70,8 @@ export interface TaskObservation {
   status: "success" | "warning" | "error";
   summary: string;
   content: string;
+  nextActions: string[];
+  artifacts: string[];
 }
 
 export interface TaskExecutionReceipt {

@@ -42,6 +42,8 @@ exhausted.
 - Adapter profiles for fake, Z.AI GLM coding, and frontier model experiments.
 - Retained `metrics.json` artifacts and benchmark aggregation with `bench`.
 - Consecutive-round eval command for proving harness stability.
+- Structured tool and harness observations with status, next actions, and
+  artifact references for recovery-aware execution receipts.
 - Terminal-native dashboard for inspecting run state, metrics, artifacts, and event logs.
 
 ## Installation
@@ -225,6 +227,9 @@ Each run writes an inspectable artifact set:
 - `execution.json`: deterministic task execution receipts, including
   `executor`, `harnessAction`, required tools, structured observations,
   task-level verification commands, command results, and next actions.
+- structured observations now carry `status`, `summary`, `nextActions`, and
+  `artifacts` so every tool or harness result can drive an explicit recovery
+  step instead of only dumping raw content.
 - `task-context-*.json`: structured task-scoped retrieval evidence captured
   for model-executed tasks that request deterministic search or symbol context.
 - `task-tool-turns-*.json`: bounded model-tool loop history for tasks that
