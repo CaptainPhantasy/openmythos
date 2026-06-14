@@ -129,5 +129,13 @@
       "npm run build"
     ],
     "requireLocalPassBeforeModelQa": true
+  },
+  "approval": {
+    "mode": "suggest",
+    "protectedPaths": [
+      ".env*",
+      "openmythos.config.json",
+      "profiles/*.json"
+    ]
   }
 }

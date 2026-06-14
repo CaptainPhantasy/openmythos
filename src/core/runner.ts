@@ -5,11 +5,13 @@ import { AdapterRegistry } from "../adapters/registry.js";
 import { StateStore } from "../state/store.js";
 import { buildFinalReport } from "./report.js";
 import { PhaseExecutor } from "./phases.js";
+import { ApprovalRequiredError } from "./review.js";
+import { buildRunMetrics } from "./metrics.js";
 import type { ContextResult, IntakeResult, Plan, QaResult, TaskOutput } from "./types.js";
 
 export interface RunResult {
   runId: string;
-  status: "completed" | "failed";
+  status: "completed" | "failed" | "awaiting_approval";
   finalOutput: string | null;
   artifacts: string[];
 }
@@ -39,6 +41,9 @@ export class Runner {
         finalOutput: state.finalOutput,
         artifacts: await this.artifacts(runId)
       };
+    }
+    if (state.status === "awaiting_approval") {
+      await this.store.updatePhase(runId, state.currentPhase);
     }
     return this.executeFrom(runId, state.goal);
   }
@@ -101,6 +106,7 @@ export class Runner {
           const finalOutput = buildFinalReport(goal, plan, outputs, qa);
           await this.store.fail(runId, `QA failed after ${this.config.execution.maxRetries} retries`);
           await this.store.writeArtifact(runId, "final.md", finalOutput);
+          await this.writeMetrics(runId, executor, context, plan, outputs, qa);
           return {
             runId,
             status: "failed",
@@ -123,6 +129,7 @@ export class Runner {
       const finalOutput = buildFinalReport(goal, plan, outputs, qa ?? null);
       await this.store.writeArtifact(runId, "final.md", finalOutput);
       await this.store.complete(runId, finalOutput);
+      await this.writeMetrics(runId, executor, context, plan, outputs, qa);
       return {
         runId,
         status: "completed",
@@ -130,8 +137,29 @@ export class Runner {
         artifacts: await this.artifacts(runId)
       };
     } catch (error) {
+      if (error instanceof ApprovalRequiredError) {
+        await this.store.awaitApproval(runId, error.message);
+        await this.event(
+          runId,
+          "execute",
+          "approval_required",
+          "warning",
+          `Approval required for ${error.taskId}`,
+          [error.review.reviewPath, error.review.patchPath],
+          Date.now() - started,
+          error.message
+        );
+        await this.writeMetrics(runId, executor, context, plan, outputs, qa);
+        return {
+          runId,
+          status: "awaiting_approval",
+          finalOutput: null,
+          artifacts: await this.artifacts(runId)
+        };
+      }
       await this.store.fail(runId, (error as Error).message);
       await this.event(runId, (await this.store.loadRun(runId))?.currentPhase ?? "intake", "run_failed", "error", "Run failed", [], Date.now() - started, (error as Error).message);
+      await this.writeMetrics(runId, executor, context, plan, outputs, qa);
       throw error;
     }
   }
@@ -159,7 +187,8 @@ export class Runner {
   }
 
   private async artifacts(runId: string): Promise<string[]> {
-    return [
+    const root = this.store.runDir(runId);
+    const files = [
       "state.json",
       "events.jsonl",
       "intake.json",
@@ -167,7 +196,42 @@ export class Runner {
       "plan.json",
       "outputs.json",
       "qa.json",
+      "metrics.json",
       "final.md"
-    ].map((file) => resolve(this.store.runDir(runId), file));
+    ].map((file) => resolve(root, file));
+
+    const { readdir } = await import("node:fs/promises");
+    try {
+      const reviewFiles = (await readdir(root))
+        .filter((entry) => entry.startsWith("review-"))
+        .map((entry) => resolve(root, entry));
+      return [...files, ...reviewFiles];
+    } catch {
+      return files;
+    }
+  }
+
+  private async writeMetrics(
+    runId: string,
+    executor: PhaseExecutor,
+    context: ContextResult | null,
+    plan: Plan | null,
+    outputs: TaskOutput[] | null,
+    qa: QaResult | null
+  ): Promise<void> {
+    const state = await this.store.loadRun(runId);
+    if (!state) {
+      return;
+    }
+    await this.store.writeArtifact(runId, "metrics.json", buildRunMetrics({
+      state,
+      context,
+      plan,
+      outputs,
+      qa,
+      reviews: executor.snapshotReviews(),
+      verification: executor.verificationMetrics(),
+      modelUsage: executor.snapshotModelUsage()
+    }));
   }
 }

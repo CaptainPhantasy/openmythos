@@ -16,11 +16,20 @@ import {
 import { applyFileEdits } from "../tools/files.js";
 import { executeShell, type ShellResult } from "../tools/shell.js";
 import { parseJsonFromModel } from "./json.js";
+import { ApprovalRequiredError, createReviewBundle } from "./review.js";
 import { contextSchema, intakeSchema, planSchema, qaSchema, taskOutputSchema } from "./schemas.js";
-import { sortTasks } from "./toposort.js";
-import type { AdapterRequest, ContextResult, IntakeResult, Plan, QaResult, TaskOutput } from "./types.js";
+import { buildExecutionBatches } from "./toposort.js";
+import type { AdapterRequest, ContextResult, IntakeResult, Plan, PlanTask, QaResult, ReviewBundle, TaskOutput } from "./types.js";
+import type { ModelUsageMetric } from "../state/types.js";
 
 export class PhaseExecutor {
+  private readonly modelUsage = new Map<string, ModelUsageMetric>();
+  private readonly reviews: ReviewBundle[] = [];
+  private lastVerificationSummary = {
+    localVerificationCount: 0,
+    localVerificationFailureCount: 0
+  };
+
   constructor(
     private readonly config: OpenMythosConfig,
     private readonly adapters: AdapterRegistry,
@@ -43,7 +52,8 @@ export class PhaseExecutor {
   }
 
   async context(intake: IntakeResult): Promise<ContextResult> {
-    const raw = await gatherContext(this.workdir, this.config.context, intake.relevantPatterns);
+    const query = [intake.description, ...intake.successCriteria].join("\n");
+    const raw = await gatherContext(this.workdir, this.config.context, intake.relevantPatterns, query);
     const filesText = Object.entries(raw.files)
       .map(([path, content]) => `=== ${path} ===\n${content}`)
       .join("\n\n");
@@ -83,26 +93,35 @@ export class PhaseExecutor {
 
   async execute(plan: Plan, context: ContextResult): Promise<TaskOutput[]> {
     const outputs: TaskOutput[] = [];
-    const sorted = sortTasks(plan.tasks, plan.dependencies);
+    const batches = buildExecutionBatches(plan.tasks, plan.dependencies);
     const snippets = Object.entries(context.relevantSnippets)
       .map(([path, content]) => `=== ${path} ===\n${content}`)
       .join("\n\n");
 
-    for (const task of sorted) {
-      const role = task.role === "critic" ? "critic" : "coder";
-      const model = this.config.models[role];
-      const output = await this.callJson(role, `execute-${task.id}`, {
-        system: role === "critic" ? CRITIC_SYSTEM : CODER_SYSTEM,
-        maxTokens: model.maxTokens,
-        temperature: model.temperature,
-        json: true,
-        messages: [{
-          role: "user",
-          content: `Task:\n${JSON.stringify(task, null, 2)}\n\nSuccess criteria:\n${plan.successCriteria.map((criterion) => `- ${criterion}`).join("\n")}\n\nRelevant snippets:\n${snippets}\n\nPrior outputs:\n${JSON.stringify(outputs, null, 2)}`
-        }]
-      }, taskOutputSchema) as TaskOutput;
-      await applyFileEdits(this.workdir, output.fileEdits, this.runDir);
-      outputs.push(output);
+    for (const batch of batches) {
+      const batchOutputs = await Promise.all(batch.map(async (task) => {
+        const output = await this.executeTask(task, plan, snippets, outputs);
+        const review = await createReviewBundle(
+          this.workdir,
+          this.runDir,
+          task.id,
+          output.fileEdits,
+          this.config.approval
+        );
+        return { task, output, review };
+      }));
+
+      for (const item of batchOutputs) {
+        this.reviews.push(item.review);
+        if (item.review.blocking) {
+          throw new ApprovalRequiredError(item.task.id, item.review);
+        }
+      }
+
+      for (const item of batchOutputs) {
+        await applyFileEdits(this.workdir, item.output.fileEdits, this.runDir);
+        outputs.push(item.output);
+      }
     }
 
     return outputs;
@@ -113,6 +132,11 @@ export class PhaseExecutor {
     for (const command of this.config.verification.localCommands) {
       localResults.push(await executeShell(command, this.workdir, this.config.execution.timeoutMs));
     }
+
+    this.lastVerificationSummary = {
+      localVerificationCount: localResults.length,
+      localVerificationFailureCount: localResults.filter((result) => result.exitCode !== 0).length
+    };
 
     const localFailures = localResults.filter((result) => result.exitCode !== 0);
     if (this.config.verification.requireLocalPassBeforeModelQa && localFailures.length > 0) {
@@ -160,6 +184,18 @@ export class PhaseExecutor {
       .join("\n\n");
   }
 
+  snapshotModelUsage(): ModelUsageMetric[] {
+    return [...this.modelUsage.values()].sort((a, b) => a.role.localeCompare(b.role));
+  }
+
+  verificationMetrics(): { localVerificationCount: number; localVerificationFailureCount: number } {
+    return { ...this.lastVerificationSummary };
+  }
+
+  snapshotReviews(): ReviewBundle[] {
+    return [...this.reviews];
+  }
+
   private async callJson<T>(
     role: "planner" | "compressor" | "coder" | "critic" | "verifier",
     label: string,
@@ -183,6 +219,8 @@ export class PhaseExecutor {
             ]
           });
 
+      this.recordModelUsage(role, response.model, response.inputTokens, response.outputTokens, response.durationMs);
+
       try {
         return schema.parse(parseJsonFromModel(response.content));
       } catch (error) {
@@ -193,6 +231,50 @@ export class PhaseExecutor {
     }
 
     throw new Error(`${lastError?.message ?? "Model output failed validation"}; raw responses saved under ${this.runDir}`);
+  }
+
+  private async executeTask(
+    task: PlanTask,
+    plan: Plan,
+    snippets: string,
+    priorOutputs: TaskOutput[]
+  ): Promise<TaskOutput> {
+    const role = task.role === "critic" ? "critic" : "coder";
+    const model = this.config.models[role];
+    return await this.callJson(role, `execute-${task.id}`, {
+      system: role === "critic" ? CRITIC_SYSTEM : CODER_SYSTEM,
+      maxTokens: model.maxTokens,
+      temperature: model.temperature,
+      json: true,
+      messages: [{
+        role: "user",
+        content: `Task:\n${JSON.stringify(task, null, 2)}\n\nSuccess criteria:\n${plan.successCriteria.map((criterion) => `- ${criterion}`).join("\n")}\n\nRelevant snippets:\n${snippets}\n\nPrior outputs:\n${JSON.stringify(priorOutputs, null, 2)}`
+      }]
+    }, taskOutputSchema) as TaskOutput;
+  }
+
+  private recordModelUsage(
+    role: string,
+    model: string,
+    inputTokens: number,
+    outputTokens: number,
+    durationMs: number
+  ): void {
+    const key = `${role}:${model}`;
+    const existing = this.modelUsage.get(key) ?? {
+      role,
+      model,
+      calls: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      durationMs: 0
+    };
+
+    existing.calls += 1;
+    existing.inputTokens += inputTokens;
+    existing.outputTokens += outputTokens;
+    existing.durationMs += durationMs;
+    this.modelUsage.set(key, existing);
   }
 }
 

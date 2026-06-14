@@ -21,6 +21,16 @@ export async function applyFileEdits(workdir: string, edits: FileEdit[], archive
       continue;
     }
 
+    if (edit.action === "patch") {
+      if (!existsSync(target)) {
+        throw new Error(`Refusing patch edit for missing file: ${edit.path}`);
+      }
+      const current = await readFile(target, "utf8");
+      const next = applyUnifiedPatch(current, normalizeUnifiedPatch(edit.path, edit.content));
+      await writeFile(target, next);
+      continue;
+    }
+
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, edit.content);
   }
@@ -87,6 +97,144 @@ export async function readRelativeFile(rootDir: string, relativePath: string): P
   return readFile(path, "utf8");
 }
 
+export function normalizeUnifiedPatch(path: string, patch: string): string {
+  const trimmed = patch.trim();
+  if (trimmed.startsWith("diff --git") || trimmed.startsWith("--- ") || trimmed.startsWith("@@")) {
+    if (trimmed.startsWith("@@")) {
+      return [
+        `--- a/${path}`,
+        `+++ b/${path}`,
+        trimmed
+      ].join("\n");
+    }
+    return trimmed;
+  }
+  throw new Error(`Patch content for ${path} is not a valid unified diff.`);
+}
+
+export function applyUnifiedPatch(original: string, patch: string): string {
+  const lines = patch.replace(/\r\n/g, "\n").split("\n");
+  const hunks = parsePatchHunks(lines);
+  const originalLines = splitLines(original);
+  const output: string[] = [];
+  let cursor = 0;
+
+  for (const hunk of hunks) {
+    const targetIndex = Math.max(0, hunk.oldStart - 1);
+    while (cursor < targetIndex && cursor < originalLines.length) {
+      output.push(originalLines[cursor] ?? "");
+      cursor += 1;
+    }
+
+    for (const part of hunk.parts) {
+      if (part.type === "context") {
+        expectLine(originalLines[cursor], part.value, hunk.header);
+        output.push(part.value);
+        cursor += 1;
+        continue;
+      }
+      if (part.type === "remove") {
+        expectLine(originalLines[cursor], part.value, hunk.header);
+        cursor += 1;
+        continue;
+      }
+      output.push(part.value);
+    }
+  }
+
+  while (cursor < originalLines.length) {
+    output.push(originalLines[cursor] ?? "");
+    cursor += 1;
+  }
+
+  return original.endsWith("\n") || output.length === 0 ? `${output.join("\n")}\n`.replace(/^\n$/, "") : output.join("\n");
+}
+
 function isInside(root: string, target: string): boolean {
   return target === root || target.startsWith(`${root}/`);
+}
+
+interface ParsedHunk {
+  header: string;
+  oldStart: number;
+  parts: Array<{ type: "context" | "remove" | "add"; value: string }>;
+}
+
+function parsePatchHunks(lines: string[]): ParsedHunk[] {
+  const hunks: ParsedHunk[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index] ?? "";
+    if (!line.startsWith("@@")) {
+      index += 1;
+      continue;
+    }
+
+    const match = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+    if (!match) {
+      throw new Error(`Invalid patch hunk header: ${line}`);
+    }
+
+    const hunk: ParsedHunk = {
+      header: line,
+      oldStart: Number.parseInt(match[1] ?? "1", 10),
+      parts: []
+    };
+    index += 1;
+
+    while (index < lines.length) {
+      const part = lines[index] ?? "";
+      if (part.startsWith("@@")) {
+        break;
+      }
+      if (part.startsWith("--- ") || part.startsWith("+++ ") || part.startsWith("diff --git")) {
+        break;
+      }
+      if (part === "\\ No newline at end of file") {
+        index += 1;
+        continue;
+      }
+
+      const prefix = part[0];
+      const value = part.slice(1);
+      if (prefix === " ") {
+        hunk.parts.push({ type: "context", value });
+      } else if (prefix === "-") {
+        hunk.parts.push({ type: "remove", value });
+      } else if (prefix === "+") {
+        hunk.parts.push({ type: "add", value });
+      } else if (part.length === 0) {
+        hunk.parts.push({ type: "context", value: "" });
+      } else {
+        throw new Error(`Invalid patch line: ${part}`);
+      }
+      index += 1;
+    }
+
+    hunks.push(hunk);
+  }
+
+  if (hunks.length === 0) {
+    throw new Error("Unified diff did not contain any hunks.");
+  }
+  return hunks;
+}
+
+function expectLine(actual: string | undefined, expected: string, header: string): void {
+  if (actual !== expected) {
+    throw new Error(`Patch did not match target file at ${header}. Expected "${expected}" but found "${actual ?? "<eof>"}".`);
+  }
+}
+
+function splitLines(text: string): string[] {
+  if (text.length === 0) {
+    return [];
+  }
+  const normalized = text.replace(/\r\n/g, "\n");
+  const parts = normalized.split("\n");
+  if (parts[parts.length - 1] === "") {
+    parts.pop();
+  }
+  return parts;
 }

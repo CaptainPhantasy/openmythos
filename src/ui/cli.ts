@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { loadConfigWithOptionalProfile } from "../config/profile.js";
+import { collectRunMetrics, summarizeBench } from "../core/metrics.js";
 import { Runner } from "../core/runner.js";
 import { StateStore } from "../state/store.js";
 import { runTui } from "./tui.js";
@@ -13,7 +14,7 @@ export function buildCli(): Command {
   program
     .name("openmythos")
     .description("Deterministic multi-model orchestration harness")
-    .version("0.1.0");
+    .version("0.2.0");
 
   program.command("run")
     .argument("<goal>", "Goal to execute")
@@ -111,6 +112,19 @@ export function buildCli(): Command {
     .action(async (options: { workdir: string }) => {
       const store = new StateStore(resolve(options.workdir, "runs"));
       console.log(JSON.stringify(await store.listRuns(), null, 2));
+    });
+
+  program.command("bench")
+    .description("Aggregate retained metrics across run directories or eval roots")
+    .option("-w, --workdir <path>", "Root path to scan for metrics", ".")
+    .action(async (options: { workdir: string }) => {
+      const root = resolve(options.workdir);
+      const metrics = await collectRunMetrics(root);
+      console.log(JSON.stringify({
+        root,
+        summary: summarizeBench(metrics),
+        runs: metrics
+      }, null, 2));
     });
 
   program.command("tui")

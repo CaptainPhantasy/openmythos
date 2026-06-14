@@ -33,13 +33,37 @@ export interface PlanTask {
   role: Extract<ModelRole, "coder" | "critic" | "verifier">;
   fileTargets: string[];
   acceptanceCriteria: string[];
+  requiredTools: string[];
+  executionMode: "parallel" | "serial";
 }
 
 export interface FileEdit {
   path: string;
-  action: "create" | "modify" | "delete";
+  action: "create" | "modify" | "delete" | "patch";
   content: string;
   description: string;
+}
+
+export interface EditRisk {
+  level: "low" | "medium" | "high";
+  reasons: string[];
+}
+
+export interface EditReview {
+  path: string;
+  action: FileEdit["action"];
+  description: string;
+  risk: EditRisk;
+  beforeExists: boolean;
+}
+
+export interface ReviewBundle {
+  taskId: string;
+  patchPath: string;
+  reviewPath: string;
+  highestRisk: EditRisk["level"];
+  blocking: boolean;
+  reviews: EditReview[];
 }
 
 export interface TaskOutput {

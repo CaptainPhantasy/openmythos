@@ -74,6 +74,14 @@ export class StateStore {
     return state;
   }
 
+  async awaitApproval(runId: string, error: string): Promise<RunState> {
+    const state = await this.mustLoad(runId);
+    state.status = "awaiting_approval";
+    state.error = error;
+    await this.saveState(state);
+    return state;
+  }
+
   async fail(runId: string, error: string): Promise<RunState> {
     const state = await this.mustLoad(runId);
     state.status = "failed";

@@ -23,11 +23,16 @@ exhausted.
 ## Features
 
 - Deterministic phase loop: intake -> context -> plan -> execute -> verify.
+- Query-aware context retrieval with scored file selection and targeted snippets.
+- Dependency-aware execution batches for independent task fan-out.
 - Filesystem-backed run state under each workspace's `runs/` directory.
 - Schema validation for every model response.
 - Bounded JSON repair retry with raw invalid-response artifacts.
+- Patch-safe file edits plus review artifacts before apply.
+- Approval policy for risky file actions before apply.
 - Local verification commands before model QA.
 - Adapter profiles for fake, Z.AI GLM coding, and frontier model experiments.
+- Retained `metrics.json` artifacts and benchmark aggregation with `bench`.
 - Consecutive-round eval command for proving harness stability.
 - Read-only TUI for inspecting run state and event logs.
 
@@ -145,6 +150,22 @@ node dist/index.js tui
 node dist/index.js tui --workdir <project-or-round-workdir> --once
 ```
 
+Benchmark retained metrics:
+
+```bash
+node dist/index.js bench --workdir .
+node dist/index.js bench --workdir runs/evals
+```
+
+Approval policy:
+
+- `approval.mode = "suggest"` writes per-task review artifacts without blocking.
+- `approval.mode = "enforce"` stops the run with `awaiting_approval` when a task
+  proposes high-risk edits such as deletes, protected-path writes, or
+  credential-like file changes.
+- Review artifacts are written into each run directory as `review-<task>.json`
+  and `review-<task>.patch`.
+
 ## Runtime Artifacts
 
 Each run writes an inspectable artifact set:
@@ -156,9 +177,17 @@ Each run writes an inspectable artifact set:
 - `plan.json`: schema-validated execution plan.
 - `outputs.json`: schema-validated worker outputs and file edits.
 - `qa.json`: local and model verification result.
+- `metrics.json`: retained run metrics, including model calls, token totals,
+  durations, edit counts, and verification counts.
 - `final.md`: final execution report.
 - `*-invalid-attempt-*.txt`: raw invalid model responses saved during bounded
   JSON repair.
+
+Plan task contract:
+
+- planners can now specify `requiredTools` and `executionMode`
+- the harness can batch dependency-free tasks when they are marked
+  `executionMode = "parallel"` and do not target the same files
 
 ## Z.AI / GLM Notes
 

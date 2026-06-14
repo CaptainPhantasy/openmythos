@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -30,5 +30,45 @@ test("applyFileEdits rejects path escape", async () => {
       { path: "../escape.txt", action: "create", content: "bad", description: "bad" }
     ], resolve(workdir, "runs", "run-1")),
     /outside workdir/
+  );
+});
+
+test("applyFileEdits can apply unified patch edits to existing files", async () => {
+  const workdir = await mkdtemp(join(tmpdir(), "openmythos-files-"));
+  const archive = resolve(workdir, "runs", "run-1");
+  await mkdir(resolve(workdir, "src"), { recursive: true });
+  await writeFile(resolve(workdir, "src", "patch-me.txt"), "alpha\nbeta\ngamma\n");
+
+  await applyFileEdits(workdir, [
+    {
+      path: "src/patch-me.txt",
+      action: "patch",
+      content: "@@ -1,3 +1,3 @@\n alpha\n-beta\n+beta patched\n gamma",
+      description: "patch line"
+    }
+  ], archive);
+
+  assert.equal(
+    await readFile(resolve(workdir, "src", "patch-me.txt"), "utf8"),
+    "alpha\nbeta patched\ngamma\n"
+  );
+});
+
+test("applyFileEdits rejects patch edits when the hunk does not match the target file", async () => {
+  const workdir = await mkdtemp(join(tmpdir(), "openmythos-files-"));
+  const archive = resolve(workdir, "runs", "run-1");
+  await mkdir(resolve(workdir, "src"), { recursive: true });
+  await writeFile(resolve(workdir, "src", "patch-me.txt"), "alpha\nbeta\ngamma\n");
+
+  await assert.rejects(
+    () => applyFileEdits(workdir, [
+      {
+        path: "src/patch-me.txt",
+        action: "patch",
+        content: "@@ -1,3 +1,3 @@\n alpha\n-bogus\n+beta patched\n gamma",
+        description: "invalid patch line"
+      }
+    ], archive),
+    /Patch did not match target file/
   );
 });

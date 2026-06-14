@@ -21,4 +21,5 @@ test("loadConfig validates a minimal valid config", async () => {
   const config = await loadConfig(path);
   assert.equal(config.execution.maxRetries, 3);
   assert.equal(config.models.planner.maxTokens, 4096);
+  assert.equal(config.approval.mode, "off");
 });

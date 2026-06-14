@@ -28,6 +28,32 @@ export const rateLimitConfigSchema = z.object({
   requestsPerMinute: z.number().int().positive()
 }).optional();
 
+export const approvalModeSchema = z.enum(["off", "suggest", "enforce"]);
+
+export const approvalConfigSchema = z.object({
+  mode: approvalModeSchema.default("off"),
+  protectedPaths: z.array(z.string()).default([]),
+  highRiskExtensions: z.array(z.string()).default([
+    ".pem",
+    ".key",
+    ".p12",
+    ".crt"
+  ]),
+  dependencyManifestPaths: z.array(z.string()).default([
+    "package.json",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "Cargo.toml",
+    "Cargo.lock",
+    "go.mod",
+    "go.sum",
+    "pyproject.toml",
+    "requirements.txt",
+    "poetry.lock"
+  ])
+}).default({});
+
 export const modelConfigSchema = z.object({
   adapter: adapterSchema,
   model: z.string().min(1),
@@ -61,7 +87,8 @@ export const openMythosConfigSchema = z.object({
   verification: z.object({
     localCommands: z.array(z.string()).default([]),
     requireLocalPassBeforeModelQa: z.boolean().default(true)
-  }).default({})
+  }).default({}),
+  approval: approvalConfigSchema
 });
 
 export type OpenMythosConfig = z.infer<typeof openMythosConfigSchema>;

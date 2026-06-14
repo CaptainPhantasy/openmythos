@@ -16,9 +16,48 @@ test("Runner completes a full deterministic fake-adapter run", async () => {
   const marker = await readFile(resolve(workdir, "openmythos-fake-output.txt"), "utf8");
   const state = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "state.json"), "utf8")) as { status: string };
   const qa = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "qa.json"), "utf8")) as { passed: boolean };
+  const metrics = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "metrics.json"), "utf8")) as {
+    status: string;
+    contextFileCount: number;
+    taskCount: number;
+    modelUsage: Array<{ role: string; calls: number }>;
+  };
 
   assert.equal(result.status, "completed");
   assert.equal(marker, "OPENMYTHOS_FAKE_SUCCESS\n");
   assert.equal(state.status, "completed");
   assert.equal(qa.passed, true);
+  assert.equal(metrics.status, "completed");
+  assert.equal(metrics.taskCount, 1);
+  assert.ok(metrics.contextFileCount >= 0);
+  assert.ok(metrics.modelUsage.length > 0);
+  assert.ok(metrics.modelUsage.some((entry) => entry.role === "planner" && entry.calls >= 1));
+});
+
+test("Runner can stop in awaiting_approval before applying risky edits", async () => {
+  const workdir = await mkdtemp(join(tmpdir(), "openmythos-fake-approval-"));
+  const config = await loadConfigWithOptionalProfile(resolve("openmythos.config.json"), "fake");
+  config.approval.mode = "enforce";
+  config.approval.protectedPaths = ["openmythos-fake-output.txt"];
+
+  const runner = new Runner(config, new StateStore(resolve(workdir, "runs")), workdir);
+  const result = await runner.run("fake run requiring approval");
+
+  const state = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "state.json"), "utf8")) as {
+    status: string;
+    error: string | null;
+  };
+  const review = JSON.parse(await readFile(resolve(workdir, "runs", result.runId, "review-task-1.json"), "utf8")) as {
+    blocking: boolean;
+    highestRisk: string;
+  };
+
+  await assert.rejects(
+    () => readFile(resolve(workdir, "openmythos-fake-output.txt"), "utf8")
+  );
+  assert.equal(result.status, "awaiting_approval");
+  assert.equal(state.status, "awaiting_approval");
+  assert.equal(review.blocking, true);
+  assert.equal(review.highestRisk, "high");
+  assert.match(state.error ?? "", /Approval required/);
 });

@@ -112,7 +112,9 @@ export const planTaskSchema = z.object({
   description: z.string().min(1),
   role: z.enum(["coder", "critic", "verifier"]),
   fileTargets: stringListSchema.default([]),
-  acceptanceCriteria: stringListSchema.refine((items) => items.length > 0, "Expected at least one acceptance criterion")
+  acceptanceCriteria: stringListSchema.refine((items) => items.length > 0, "Expected at least one acceptance criterion"),
+  requiredTools: stringListSchema.default([]),
+  executionMode: z.enum(["parallel", "serial"]).default("serial")
 });
 
 export const planSchema = z.object({
@@ -124,9 +126,16 @@ export const planSchema = z.object({
 
 export const fileEditSchema = z.object({
   path: z.string().min(1),
-  action: z.enum(["create", "modify", "delete"]),
+  action: z.enum(["create", "modify", "delete", "patch"]),
   content: z.string(),
   description: z.string().min(1).default("Model-provided file edit")
+}).superRefine((edit, ctx) => {
+  if (edit.action === "patch" && !edit.content.includes("@@")) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Patch edits must contain at least one unified-diff hunk header."
+    });
+  }
 });
 
 export const taskOutputSchema = z.object({

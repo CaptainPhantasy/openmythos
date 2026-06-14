@@ -3,7 +3,7 @@ import type { Phase } from "../core/types.js";
 export interface RunState {
   runId: string;
   goal: string;
-  status: "running" | "completed" | "failed";
+  status: "running" | "awaiting_approval" | "completed" | "failed";
   currentPhase: Phase;
   phasesCompleted: Phase[];
   retryCount: number;
@@ -24,4 +24,36 @@ export interface RunEvent {
   nextActions: string[];
   durationMs: number;
   error?: string;
+}
+
+export interface ModelUsageMetric {
+  role: string;
+  model: string;
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  durationMs: number;
+}
+
+export interface RunMetrics {
+  runId: string;
+  goal: string;
+  status: RunState["status"];
+  startedAt: string;
+  completedAt: string | null;
+  totalDurationMs: number;
+  retryCount: number;
+  phaseCount: number;
+  contextFileCount: number;
+  taskCount: number;
+  fileEditCount: number;
+  patchEditCount: number;
+  deleteEditCount: number;
+  highRiskReviewCount: number;
+  blockingReviewCount: number;
+  localVerificationCount: number;
+  localVerificationFailureCount: number;
+  qaPassed: boolean | null;
+  qaScore: number | null;
+  modelUsage: ModelUsageMetric[];
 }

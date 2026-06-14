@@ -47,6 +47,8 @@ export class FakeAdapter implements ModelAdapter {
             description: "Create a file proving the runner applied a model-provided edit.",
             role: "coder",
             fileTargets: ["openmythos-fake-output.txt"],
+            requiredTools: ["filesystem.write"],
+            executionMode: "serial",
             acceptanceCriteria: [
               "The file exists",
               "The file contains OPENMYTHOS_FAKE_SUCCESS"
