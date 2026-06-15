@@ -1,6 +1,8 @@
 node_modules/
 dist/
 runs/
+eval-*/
+suite-*/
 reviews/
 .env
 *.log
