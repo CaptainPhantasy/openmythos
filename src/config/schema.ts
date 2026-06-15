@@ -104,6 +104,7 @@ export const modelConfigSchema = z.object({
   temperature: z.number().min(0).max(2).default(0.2),
   baseUrl: z.string().url().optional(),
   apiKeyEnv: z.string().min(1).optional(),
+  timeoutMs: z.number().int().positive().default(120000),
   thinking: thinkingConfigSchema,
   rateLimit: rateLimitConfigSchema
 });

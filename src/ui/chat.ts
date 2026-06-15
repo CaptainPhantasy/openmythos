@@ -30,7 +30,8 @@ export function createChatSession(
 
 export async function sendChatMessage(
   session: ChatSession,
-  userText: string
+  userText: string,
+  onToken?: (token: string) => void
 ): Promise<string> {
   const trimmedMessages = session.messages.slice(-session.maxContextTurns);
 
@@ -50,13 +51,17 @@ export async function sendChatMessage(
   trimmedMessages.push({ role: "user", content: userText });
 
   const model = session.config.models.coder;
-  const response = await session.adapters.call("coder", {
+  const request = {
     system: systemPrompt,
     maxTokens: model.maxTokens,
     temperature: model.temperature,
     json: false,
     messages: trimmedMessages,
-  });
+  };
+
+  const response = onToken
+    ? await session.adapters.callStream("coder", request, onToken)
+    : await session.adapters.call("coder", request);
 
   session.messages.push({ role: "user", content: userText });
   session.messages.push({ role: "assistant", content: response.content });
@@ -110,10 +115,15 @@ export async function runChatRepl(session: ChatSession): Promise<void> {
 
     process.stdout.write("... thinking ...     \r");
     try {
-      const response = await sendChatMessage(session, input);
-      process.stdout.write("                     \r");
-      console.log(response);
-      console.log("");
+      let firstToken = true;
+      await sendChatMessage(session, input, (token) => {
+        if (firstToken) {
+          process.stdout.write("                     \r");
+          firstToken = false;
+        }
+        process.stdout.write(token);
+      });
+      console.log("\n");
     } catch (error) {
       process.stdout.write("                     \r");
       console.error(`Error: ${(error as Error).message}`);
