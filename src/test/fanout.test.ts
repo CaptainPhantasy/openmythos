@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { buildFanoutBatches, fanOut, type FanoutTask } from "../core/fanout.js";
+import { buildFanoutBatches, fanOut, mapWithConcurrency, type FanoutTask } from "../core/fanout.js";
 
 describe("fanout: dependency batching (real logic)", () => {
   it("places independent tasks in a single batch", () => {
@@ -101,5 +101,58 @@ describe("fanout: parallel execution (real async)", () => {
     release.resolve();
     const results = await fanoutPromise;
     assert.ok(results.every((r) => r.status === "completed"));
+  });
+});
+
+describe("mapWithConcurrency: bounded concurrency (deterministic, no timers)", () => {
+  it("never exceeds the concurrency cap", async () => {
+    const cap = 2;
+    const releases = [
+      Promise.withResolvers<void>(),
+      Promise.withResolvers<void>(),
+      Promise.withResolvers<void>(),
+      Promise.withResolvers<void>(),
+    ];
+    const startedGates = releases.map(() => Promise.withResolvers<void>());
+    const started = [false, false, false, false];
+    let active = 0;
+    let maxActive = 0;
+
+    const mapPromise = mapWithConcurrency(
+      [0, 1, 2, 3],
+      async (i) => {
+        active++;
+        maxActive = Math.max(maxActive, active);
+        started[i] = true;
+        startedGates[i]!.resolve();
+        await releases[i]!.promise;
+        active--;
+        return i * 10;
+      },
+      cap
+    );
+
+    // First wave: exactly `cap` tasks start; the rest stay queued.
+    await startedGates[0]!.promise;
+    await startedGates[1]!.promise;
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(active, cap, "exactly cap tasks active in first wave");
+    assert.equal(maxActive, cap, "max active never exceeds cap");
+    assert.equal(started[2], false, "third task must not start until a slot frees");
+    assert.equal(started[3], false, "fourth task must not start until a slot frees");
+
+    // Free one slot -> the next queued task starts, still within the cap.
+    releases[0]!.resolve();
+    await startedGates[2]!.promise;
+    assert.equal(maxActive, cap, "still bounded after a slot frees");
+
+    // Drain the rest.
+    releases[1]!.resolve();
+    releases[2]!.resolve();
+    releases[3]!.resolve();
+    const results = await mapPromise;
+    assert.deepEqual(results, [0, 10, 20, 30], "results preserved in input order");
+    assert.equal(maxActive, cap, "cap respected for the whole run");
   });
 });

@@ -32,6 +32,7 @@ import { scanForSecrets, summarizeRisk, type SecurityFinding } from "./guardrail
 import { routeModel, defaultRoutingPolicies, classifyComplexity, classifyRisk } from "./model-routing.js";
 import { loadRoutingStats, getAdaptiveRole } from "./adaptive-routing.js";
 import { estimateTokens, createBudget, remainingTokens, fitToWindow } from "./context-window.js";
+import { mapWithConcurrency } from "./fanout.js";
 import type { AdapterMessage, AdapterRequest, CommandReceipt, ContextResult, IntakeResult, Plan, PlanTask, QaResult, ReviewBundle, TaskExecutionReceipt, TaskObservation, TaskOutput, TaskStepResult, TaskToolRequest } from "./types.js";
 import type { ModelUsageMetric } from "../state/types.js";
 
@@ -174,9 +175,16 @@ export class PhaseExecutor {
     const outputs: TaskOutput[] = [];
     this.taskReceipts = [];
     const batches = buildExecutionBatches(plan.tasks, plan.dependencies);
+    // Multi-agent fan-out with bounded concurrency: independent tasks in a
+    // dependency batch run in parallel, but never exceed the most restrictive
+    // configured model's concurrency limit (e.g. glm-5.2=2, glm-5.1=10).
+    const modelLimits = Object.values(this.config.models)
+      .map((m) => m.rateLimit?.requestsPerMinute)
+      .filter((n): n is number => typeof n === "number");
+    const maxConcurrency = modelLimits.length > 0 ? Math.max(1, Math.min(...modelLimits)) : 4;
 
     for (const batch of batches) {
-      const batchOutputs = await Promise.all(batch.map(async (task) => {
+      const batchOutputs = await mapWithConcurrency(batch, async (task) => {
         const resolvedTask: PlanTask = {
           ...task,
           verificationCommands: this.resolveTaskVerificationCommands(task, intake ?? null)
@@ -190,7 +198,7 @@ export class PhaseExecutor {
           this.config.approval
         );
         return { task: resolvedTask, execution, review };
-      }));
+      }, maxConcurrency);
 
       for (const item of batchOutputs) {
         this.reviews.push(item.review);

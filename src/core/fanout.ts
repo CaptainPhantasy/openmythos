@@ -48,25 +48,39 @@ export function buildFanoutBatches<T>(tasks: FanoutTask<T>[]): FanoutTask<T>[][]
 }
 
 /**
- * Run a list of thunks through a bounded concurrency pool, preserving input order.
+ * Map items through an async mapper with bounded concurrency, preserving input
+ * order. Propagates the first rejection (same failure semantics as Promise.all).
+ * This is the primitive the harness uses to cap parallel worker calls so it
+ * never exceeds a model's concurrency limit.
  */
-async function runPool<T>(
-  items: Array<() => Promise<T>>,
+export async function mapWithConcurrency<I, O>(
+  items: I[],
+  mapper: (item: I, index: number) => Promise<O>,
   maxConcurrency: number
-): Promise<T[]> {
-  const results: T[] = new Array(items.length);
+): Promise<O[]> {
+  const results: O[] = new Array(items.length);
   let cursor = 0;
 
   async function worker(): Promise<void> {
     while (cursor < items.length) {
       const index = cursor++;
-      results[index] = await items[index]!();
+      results[index] = await mapper(items[index]!, index);
     }
   }
 
   const workerCount = Math.max(1, Math.min(maxConcurrency, items.length));
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
   return results;
+}
+
+/**
+ * Run a list of thunks through a bounded concurrency pool, preserving input order.
+ */
+async function runPool<T>(
+  items: Array<() => Promise<T>>,
+  maxConcurrency: number
+): Promise<T[]> {
+  return mapWithConcurrency(items, (thunk) => thunk(), maxConcurrency);
 }
 
 /**

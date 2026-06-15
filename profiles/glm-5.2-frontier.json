@@ -2,23 +2,28 @@
   "models": {
     "planner": {
       "model": "glm-5.2",
-      "maxTokens": 32768
+      "maxTokens": 32768,
+      "rateLimit": { "requestsPerMinute": 2 }
     },
     "compressor": {
       "model": "glm-5.2",
-      "maxTokens": 16384
+      "maxTokens": 16384,
+      "rateLimit": { "requestsPerMinute": 2 }
     },
     "coder": {
       "model": "glm-5.2",
-      "maxTokens": 32768
+      "maxTokens": 32768,
+      "rateLimit": { "requestsPerMinute": 2 }
     },
     "critic": {
       "model": "glm-5.2",
-      "maxTokens": 16384
+      "maxTokens": 16384,
+      "rateLimit": { "requestsPerMinute": 2 }
     },
     "verifier": {
       "model": "glm-5.2",
-      "maxTokens": 16384
+      "maxTokens": 16384,
+      "rateLimit": { "requestsPerMinute": 2 }
     }
   }
 }
