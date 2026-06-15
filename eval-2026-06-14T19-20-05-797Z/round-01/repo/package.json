@@ -1,8 +1,0 @@
-{
-  "name": "openmythos-real-eval-noop-js",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "test": "node --test src/noop.test.js"
-  }
-}
