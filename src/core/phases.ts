@@ -30,6 +30,8 @@ import {
 import { buildExecutionBatches } from "./toposort.js";
 import { scanForSecrets, summarizeRisk, type SecurityFinding } from "./guardrails.js";
 import { routeModel, defaultRoutingPolicies, classifyComplexity, classifyRisk } from "./model-routing.js";
+import { loadRoutingStats, getAdaptiveRole } from "./adaptive-routing.js";
+import { estimateTokens, createBudget, remainingTokens, fitToWindow } from "./context-window.js";
 import type { AdapterMessage, AdapterRequest, CommandReceipt, ContextResult, IntakeResult, Plan, PlanTask, QaResult, ReviewBundle, TaskExecutionReceipt, TaskObservation, TaskOutput, TaskStepResult, TaskToolRequest } from "./types.js";
 import type { ModelUsageMetric } from "../state/types.js";
 
@@ -68,10 +70,19 @@ export class PhaseExecutor {
   async context(intake: IntakeResult): Promise<ContextResult> {
     const query = [intake.description, ...intake.successCriteria].join("\n");
     const raw = await gatherContext(this.workdir, this.config.context, intake.relevantPatterns, query);
-    const filesText = Object.entries(raw.files)
-      .map(([path, content]) => `=== ${path} ===\n${content}`)
-      .join("\n\n");
+    const fileBlocks = Object.entries(raw.files)
+      .map(([path, content]) => `=== ${path} ===\n${content}`);
     const model = this.config.models.compressor;
+    // Context window management: reserve room for the system prompt, manifest,
+    // and the worker's output, then fit file blocks into the remaining budget.
+    // The harness never overflows the disposable worker's context window.
+    const reserved = estimateTokens(COMPRESSOR_SYSTEM) + estimateTokens(raw.manifest.join("\n")) + model.maxTokens;
+    const budget = createBudget(this.config.context.maxContextTokens, reserved);
+    const fit = fitToWindow(fileBlocks, remainingTokens(budget));
+    const filesText = fit.kept.join("\n\n");
+    const droppedNote = fit.dropped > 0
+      ? `\n\n[context-window: dropped ${fit.dropped} lower-priority file block(s) to fit the ${remainingTokens(budget)}-token budget]`
+      : "";
     const parsed = await this.callJson("compressor", "context", {
       system: COMPRESSOR_SYSTEM,
       maxTokens: model.maxTokens,
@@ -79,7 +90,7 @@ export class PhaseExecutor {
       json: true,
       messages: [{
         role: "user",
-        content: `Task:\n${intake.description}\n\nFile manifest:\n${raw.manifest.join("\n")}\n\nFiles:\n${filesText}`
+        content: `Task:\n${intake.description}\n\nFile manifest:\n${raw.manifest.join("\n")}\n\nFiles:\n${filesText}${droppedNote}`
       }]
     }, contextSchema) as ContextResult;
     return {
@@ -136,8 +147,9 @@ export class PhaseExecutor {
     };
   }
 
-  private applyRouting(plan: Plan, intake: IntakeResult): Plan {
+  private async applyRouting(plan: Plan, intake: IntakeResult): Promise<Plan> {
     const policies = defaultRoutingPolicies();
+    const stats = await loadRoutingStats(this.workdir);
     const routedTasks = plan.tasks.map((task) => {
       if (task.executor === "harness") return task;
       const complexity = classifyComplexity(task.description, task.fileTargets.length, task.acceptanceCriteria.length * 20);
@@ -146,7 +158,14 @@ export class PhaseExecutor {
         { type: intake.taskType, complexity, riskLevel, requiresTools: task.requiredTools.length > 0 },
         policies
       );
-      return { ...task, routing: { taskType: intake.taskType, complexity, riskLevel, routedRole: decision.role, routingReason: decision.reason } };
+      // Adaptive override: if outcome history favors a role for this task type,
+      // use it over the static policy. The harness learns which disposable
+      // worker performs best per task type.
+      const candidates = Array.from(new Set([decision.role, ...decision.alternatives]));
+      const adaptive = getAdaptiveRole(stats, intake.taskType, candidates, decision.role);
+      const routedRole = adaptive.basedOnHistory ? adaptive.role : decision.role;
+      const routingReason = adaptive.basedOnHistory ? adaptive.reason : decision.reason;
+      return { ...task, routing: { taskType: intake.taskType, complexity, riskLevel, routedRole, routingReason } };
     });
     return { ...plan, tasks: routedTasks };
   }

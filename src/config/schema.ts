@@ -126,6 +126,7 @@ export const openMythosConfigSchema = z.object({
   context: z.object({
     maxFiles: z.number().int().positive().default(80),
     maxFileSizeBytes: z.number().int().positive().default(120000),
+    maxContextTokens: z.number().int().positive().default(100000),
     ignorePatterns: z.array(z.string()).default([]),
     ignoreExtensions: z.array(z.string()).default([])
   }).default({}),

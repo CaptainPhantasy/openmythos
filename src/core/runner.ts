@@ -11,6 +11,7 @@ import { ApprovalRequiredError, ToolApprovalRequiredError } from "./review.js";
 import { buildRunMetrics } from "./metrics.js";
 import { createWorktree, cleanupWorktree, type WorktreeHandle } from "./worktree.js";
 import { addNote, addDecision } from "./memory.js";
+import { recordOutcome } from "./adaptive-routing.js";
 import type { ContextResult, IntakeResult, IssueContext, Plan, PullRequestContext, PullRequestVerification, QaResult, TaskOutput } from "./types.js";
 
 export interface RunResult {
@@ -242,6 +243,7 @@ export class Runner {
           await this.store.fail(runId, `QA failed after ${this.config.execution.maxRetries} retries`);
           await this.store.writeArtifact(runId, "final.md", finalOutput);
           await this.writeMetrics(runId, executor, context, plan, outputs, qa);
+          await this.recordRoutingOutcomes(plan, false, Date.now() - started);
           return {
             runId,
             status: "failed",
@@ -265,6 +267,7 @@ export class Runner {
       await this.store.writeArtifact(runId, "final.md", finalOutput);
       await this.store.complete(runId, finalOutput);
       await this.writeMetrics(runId, executor, context, plan, outputs, qa);
+      await this.recordRoutingOutcomes(plan, qa?.passed ?? false, Date.now() - started);
       if (this.config.memory?.enabled !== false) {
         await addNote(this.workdir, `Run ${runId}: ${goal}`, ["run"]).catch(() => {});
       }
@@ -329,6 +332,7 @@ export class Runner {
         };
       }
       await this.store.fail(runId, (error as Error).message);
+      await this.recordRoutingOutcomes(plan, false, Date.now() - started);
       await this.event(runId, (await this.store.loadRun(runId))?.currentPhase ?? "intake", "run_failed", "error", "Run failed", [], Date.now() - started, (error as Error).message);
       await this.writeMetrics(runId, executor, context, plan, outputs, qa);
       if (worktreeHandle?.isolated) {
@@ -414,6 +418,20 @@ export class Runner {
       verification: executor.verificationMetrics(),
       modelUsage: executor.snapshotModelUsage()
     }));
+  }
+
+  private async recordRoutingOutcomes(plan: Plan | null, passed: boolean, durationMs: number): Promise<void> {
+    if (!plan) return;
+    for (const task of plan.tasks) {
+      if (task.executor === "harness" || !task.routing) continue;
+      await recordOutcome(
+        this.workdir,
+        task.routing.taskType,
+        task.routing.routedRole,
+        passed,
+        durationMs
+      ).catch(() => {});
+    }
   }
 
   private async syncStoredMetricsState(runId: string, state: { status: RunResult["status"]; startedAt: string; completedAt: string | null; retryCount: number; phasesCompleted: string[] }): Promise<void> {
