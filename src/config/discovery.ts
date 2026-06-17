@@ -7,6 +7,7 @@ export type ConfigDiscoverySource =
   | "cwd-ancestor"
   | "workdir"
   | "workdir-ancestor"
+  | "binary-ancestor"
   | "missing";
 
 export interface ConfigDiscoveryResult {
@@ -15,7 +16,19 @@ export interface ConfigDiscoveryResult {
   source: ConfigDiscoverySource;
 }
 
-export function discoverConfigPath(configPath: string, workdir: string, cwd = process.cwd()): ConfigDiscoveryResult {
+/**
+ * Discover the config file. Search order:
+ *   1. Absolute path (if configPath is absolute)
+ *   2. workdir + ancestors
+ *   3. cwd + ancestors
+ *   4. binary install location + ancestors (so global installs work from any cwd)
+ */
+export function discoverConfigPath(
+  configPath: string,
+  workdir: string,
+  cwd = process.cwd(),
+  binaryDir?: string,
+): ConfigDiscoveryResult {
   if (isAbsolute(configPath)) {
     const absolutePath = resolve(configPath);
     return {
@@ -42,9 +55,20 @@ export function discoverConfigPath(configPath: string, workdir: string, cwd = pr
         source: directory === resolvedCwd ? "cwd" : "cwd-ancestor"
       });
     }
+    if (binaryDir) {
+      for (const directory of ancestorDirectories(resolve(binaryDir))) {
+        candidates.push({
+          path: resolve(directory, configPath),
+          source: "binary-ancestor"
+        });
+      }
+    }
   } else {
     candidates.push({ path: resolve(resolvedCwd, configPath), source: "cwd" });
     candidates.push({ path: resolve(resolvedWorkdir, configPath), source: "workdir" });
+    if (binaryDir) {
+      candidates.push({ path: resolve(binaryDir, configPath), source: "binary-ancestor" });
+    }
   }
 
   const uniqueCandidates: typeof candidates = [];

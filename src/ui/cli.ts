@@ -1,7 +1,8 @@
 import { Command } from "commander";
 import { existsSync } from "node:fs";
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
-import { basename, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { discoverConfigPath, formatConfigDiscoveryFailure } from "../config/discovery.js";
 import { loadConfigWithOptionalProfile } from "../config/profile.js";
 import { resolveIssueSource } from "../core/issues.js";
@@ -34,6 +35,15 @@ import { defaultRoutingPolicies, routeModel, classifyComplexity, classifyRisk } 
 import { runInit, getProviderPresets } from "../core/init.js";
 import { createChatSession, runChatRepl } from "./chat.js";
 import { AdapterRegistry } from "../adapters/registry.js";
+
+/** Directory where this compiled binary lives — used as a config-search fallback
+ *  so globally-installed `openmythos` works from any cwd. */
+const BINARY_DIR = dirname(fileURLToPath(import.meta.url));
+
+/** Wrapper that bakes in BINARY_DIR as a fallback config-search root. */
+function discoverConfig(configPath: string, workdir: string) {
+  return discoverConfigPath(configPath, workdir, process.cwd(), BINARY_DIR);
+}
 import {
   createSnapshot,
   restoreSnapshot,
@@ -582,7 +592,7 @@ export function buildCli(): Command {
     .option("-g, --goal <goal>", "Evaluation goal", "deterministic fake eval round")
     .action(async (options: { config: string; profile: string; rounds: number; workdir: string; goal: string }) => {
       const evalRoot = resolve(options.workdir, `eval-${new Date().toISOString().replace(/[:.]/g, "-")}`);
-      const resolvedConfigPath = discoverConfigPath(options.config, options.workdir).path;
+      const resolvedConfigPath = discoverConfig(options.config, options.workdir).path;
       await mkdir(evalRoot, { recursive: true });
       const results: Array<{ round: number; status: string; runId?: string; workdir: string; error?: string }> = [];
 
@@ -631,7 +641,7 @@ export function buildCli(): Command {
     .option("-g, --goal <goal>", "Override the fixture goal")
     .action(async (options: { config: string; profile?: string; fixture: string; rounds: number; workdir: string; goal?: string }) => {
       await runLiveEvalCommand({
-        config: discoverConfigPath(options.config, options.workdir).path,
+        config: discoverConfig(options.config, options.workdir).path,
         profile: options.profile,
         fixture: options.fixture,
         rounds: options.rounds,
@@ -650,7 +660,7 @@ export function buildCli(): Command {
     .option("-g, --goal <goal>", "Override the fixture goal")
     .action(async (options: { config: string; profile?: string; fixture: string; rounds: number; workdir: string; goal?: string }) => {
       await runLiveEvalCommand({
-        config: discoverConfigPath(options.config, options.workdir).path,
+        config: discoverConfig(options.config, options.workdir).path,
         profile: options.profile,
         fixture: options.fixture,
         rounds: options.rounds,
@@ -669,7 +679,7 @@ export function buildCli(): Command {
       const startedAt = new Date().toISOString();
       const suite = await loadRealEvalSuite(options.suite);
       const resolvedWorkdir = resolve(options.workdir);
-      const profileConfigPath = discoverConfigPath(options.config, resolvedWorkdir).path;
+      const profileConfigPath = discoverConfig(options.config, resolvedWorkdir).path;
       const evalRoot = resolve(resolvedWorkdir, `suite-${new Date().toISOString().replace(/[:.]/g, "-")}`);
       await mkdir(evalRoot, { recursive: true });
       await writeFile(resolve(evalRoot, "suite.json"), JSON.stringify(suite, null, 2));
@@ -1047,7 +1057,7 @@ export function buildCli(): Command {
     .option("-w, --workdir <path>", "Target working directory", ".")
     .action(async (options: { workdir: string }) => {
       const workdir = resolve(options.workdir);
-      const configPath = discoverConfigPath("openmythos.config.json", workdir).path;
+      const configPath = discoverConfig("openmythos.config.json", workdir).path;
       const report = await runSetupCheck({ workdir, configPath });
       console.log(JSON.stringify({
         step: "setup_check",
@@ -1376,7 +1386,7 @@ export function buildCli(): Command {
     .option("-w, --workdir <path>", "Working directory", ".")
     .option("-p, --profile <name>", "Profile name")
     .action(async (options: { config: string; workdir: string; profile?: string }) => {
-      const configResolution = discoverConfigPath(options.config, resolve(options.workdir));
+      const configResolution = discoverConfig(options.config, resolve(options.workdir));
       const config = await loadConfigWithOptionalProfile(configResolution.path, options.profile);
       console.log(JSON.stringify(config, null, 2));
     });
@@ -1387,7 +1397,7 @@ export function buildCli(): Command {
     .option("-w, --workdir <path>", "Working directory", ".")
     .action(async (options: { config: string; workdir: string }) => {
       const workdir = resolve(options.workdir);
-      const configResolution = discoverConfigPath(options.config, workdir);
+      const configResolution = discoverConfig(options.config, workdir);
       console.log("=== OpenMythos Doctor ===\n");
       console.log(`Working directory: ${workdir}`);
       console.log(`Config path: ${configResolution.path}`);
@@ -1539,7 +1549,7 @@ export function buildCli(): Command {
 
 async function chatRuntime(configPath: string, workdirPath: string, profile?: string): Promise<{ config: Awaited<ReturnType<typeof loadConfigWithOptionalProfile>>; adapters: AdapterRegistry; workdir: string }> {
   const resolvedWorkdir = resolve(workdirPath);
-  const configResolution = discoverConfigPath(configPath, resolvedWorkdir);
+  const configResolution = discoverConfig(configPath, resolvedWorkdir);
   const configFile = configResolution.path;
   if (!existsSync(configFile)) {
     throw new Error(formatConfigDiscoveryFailure(configResolution));
@@ -1551,7 +1561,7 @@ async function chatRuntime(configPath: string, workdirPath: string, profile?: st
 
 async function runtime(configPath: string, workdirPath: string, profile?: string): Promise<{ runner: Runner; store: StateStore; config: Awaited<ReturnType<typeof loadConfigWithOptionalProfile>> }> {
   const resolvedWorkdir = resolve(workdirPath);
-  const configResolution = discoverConfigPath(configPath, resolvedWorkdir);
+  const configResolution = discoverConfig(configPath, resolvedWorkdir);
   const configFile = configResolution.path;
   if (!existsSync(configFile)) {
     throw new Error(formatConfigDiscoveryFailure(configResolution));
@@ -1866,7 +1876,7 @@ async function runLiveEvalCommand(options: {
   goal: string | undefined;
 }) {
   const fixture = await loadRealEvalFixture(options.fixture);
-  const resolvedProfileConfigPath = discoverConfigPath(options.config, options.workdir).path;
+  const resolvedProfileConfigPath = discoverConfig(options.config, options.workdir).path;
   const evalRoot = resolve(options.workdir, `eval-${new Date().toISOString().replace(/[:.]/g, "-")}`);
   await mkdir(evalRoot, { recursive: true });
   const startedAt = new Date().toISOString();
