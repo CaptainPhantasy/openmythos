@@ -54,6 +54,14 @@ import {
   applyPatch,
   type BatchEdit,
 } from "../core/advanced-tools.js";
+import { renderSplash } from "./splash.js";
+import { runSysmon } from "./sysmon.js";
+import { runLoop } from "../core/loop.js";
+import type { StepSpec } from "../core/verification.js";
+import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
+import { existsSync as existsSyncSync } from "node:fs";
+
 export function buildCli(): Command {
   const program = new Command();
 
@@ -971,6 +979,45 @@ export function buildCli(): Command {
           once: Boolean(options.once)
         });
       }
+    });
+
+  program.command("sysmon")
+    .description("OMVOID splash + colorful system monitor (btop + macmon on Apple Silicon)")
+    .option("--no-splash", "Skip the OMVOID banner")
+    .option("--no-macmon", "Skip macmon (Apple Silicon GPU/power)")
+    .action(async (options: { splash: boolean; macmon: boolean }) => {
+      await runSysmon({ noSplash: !options.splash, noMacmon: !options.macmon });
+    });
+
+  program.command("loop")
+    .description("Run the OpenMythos worker/watcher/replace loop on a goal or fixture")
+    .option("-f, --fixture <path>", "Real-eval fixture path (uses its manifest goal + verification)")
+    .option("-g, --goal <text>", "Goal text (used when no fixture)")
+    .option("-w, --workdir <path>", "Working directory (default: temp copy of fixture)")
+    .option("--verify <cmd>", "Verification command (repeatable)", collectArgs, [])
+    .option("--title <text>", "Step title", "main")
+    .option("-n, --name <project>", "Project name for stoppage doc", "openmythos")
+    .option("--max-redirects <n>", "In-place retries before kill", "3")
+    .option("--max-replacements <n>", "Worker replacements before park", "3")
+    .option("--temp <t>", "Base worker temperature", "0.3")
+    .option("--temp-decrement <d>", "Temp drop per replacement", "0.2")
+    .option("--no-splash", "Skip OMVOID banner before run")
+    .action(async (options: LoopCliOptions) => {
+      if (!options.noSplash) {
+        renderSplash({ subtitle: `loop  ·  ${options.name}  ·  worker/watcher/replace`, clear: true });
+      }
+      const steps = await buildStepsFromOptions(options);
+      const workdir = options.workdir ?? await freshFixtureWorkdir(options);
+      const result = await runLoop(steps, {
+        workdir,
+        projectName: options.name,
+        maxRedirects: parseInt(options.maxRedirects, 10),
+        maxReplacements: parseInt(options.maxReplacements, 10),
+        baseTemperature: parseFloat(options.temp),
+        temperatureDecrement: parseFloat(options.tempDecrement),
+      });
+      process.stdout.write("\n" + JSON.stringify(result, null, 2) + "\n");
+      process.exitCode = result.status === "all_verified" ? 0 : 65;
     });
 
   program.command("memory")
@@ -1934,4 +1981,80 @@ function countConsecutiveFixtureSuccesses(fixtureResults: Array<{ passed: boolea
     count += 1;
   }
   return count;
+}
+
+// ---------- loop command helpers ----------
+
+interface LoopCliOptions {
+  fixture?: string;
+  goal?: string;
+  workdir?: string;
+  verify?: string[];
+  title?: string;
+  name: string;
+  maxRedirects: string;
+  maxReplacements: string;
+  temp: string;
+  tempDecrement: string;
+  splash: boolean;
+  noSplash: boolean;
+}
+
+function collectArgs(value: string, previous: string[]): string[] {
+  return [...previous, value];
+}
+
+async function freshFixtureWorkdir(options: LoopCliOptions): Promise<string> {
+  if (options.fixture) {
+    if (!existsSyncSync(options.fixture)) {
+      throw new Error(`Fixture not found: ${options.fixture}`);
+    }
+    const repoCandidate = resolve(options.fixture, "repo");
+    const src = existsSyncSync(repoCandidate) ? repoCandidate : options.fixture;
+    const d = await import("node:fs/promises").then(m => m.mkdtemp(resolve(tmpdir(), "omp-loop-")));
+    const workdir = resolve(d, "repo");
+    await import("node:fs/promises").then(m => m.cp(src, workdir, { recursive: true }));
+    try {
+      const { rmSync } = await import("node:fs");
+      rmSync(resolve(workdir, ".git"), { recursive: true, force: true });
+    } catch { /* ignore */ }
+    return workdir;
+  }
+  return process.cwd();
+}
+
+async function buildStepsFromOptions(options: LoopCliOptions): Promise<StepSpec[]> {
+  let goal = options.goal ?? "";
+  let verifyCommands = options.verify ?? [];
+  let title = options.title ?? "main";
+
+  if (options.fixture) {
+    const manifestPath = resolve(options.fixture, "manifest.json");
+    if (existsSyncSync(manifestPath)) {
+      try {
+        const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+          goal?: string; verificationCommands?: string[];
+        };
+        if (!goal && manifest.goal) goal = manifest.goal;
+        if (verifyCommands.length === 0 && Array.isArray(manifest.verificationCommands)) {
+          verifyCommands = manifest.verificationCommands;
+        }
+      } catch { /* fall through */ }
+    }
+  }
+  if (!goal) {
+    throw new Error("loop: provide --goal <text> or --fixture <path> with a manifest goal");
+  }
+  if (verifyCommands.length === 0) {
+    verifyCommands = ["npm test"];
+  }
+
+  return [{
+    id: `step-${randomUUID().slice(0, 8)}`,
+    title,
+    description: goal,
+    verificationCommands: verifyCommands,
+    concreteChecks: [],
+    judgmentEnabled: false,
+  }];
 }

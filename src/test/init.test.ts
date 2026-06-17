@@ -119,15 +119,21 @@ describe("init module", () => {
   });
 
   it("detectProviderFromEnv returns preset when key set", () => {
-    const previous = process.env.OPENAI_API_KEY;
+    const savedKeys: Record<string, string | undefined> = {};
+    for (const preset of getProviderPresets()) {
+      savedKeys[preset.apiKeyEnv] = process.env[preset.apiKeyEnv];
+      delete process.env[preset.apiKeyEnv];
+    }
     process.env.OPENAI_API_KEY = "test-key-value";
     try {
       const result = detectProviderFromEnv();
       assert.ok(result);
       assert.equal(result!.id, "openai");
     } finally {
-      if (previous === undefined) delete process.env.OPENAI_API_KEY;
-      else process.env.OPENAI_API_KEY = previous;
+      for (const [k, v] of Object.entries(savedKeys)) {
+        if (v !== undefined) process.env[k] = v;
+      }
+      delete process.env.OPENAI_API_KEY;
     }
   });
 });

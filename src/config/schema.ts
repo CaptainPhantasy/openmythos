@@ -121,6 +121,8 @@ export const openMythosConfigSchema = z.object({
     maxRetries: z.number().int().min(0).default(3),
     maxTaskToolTurns: z.number().int().min(0).default(3),
     timeoutMs: z.number().int().positive().default(120000),
+    minPolishRounds: z.number().int().min(0).default(1),
+    requireAdversarialReview: z.boolean().default(true),
     workingDirectory: z.string().default(".")
   }).default({}),
   context: z.object({

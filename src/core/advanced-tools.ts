@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { readFile, writeFile, mkdir, readdir, copyFile, stat, rm } from "node:fs/promises";
+import { readFile, writeFile, mkdir, readdir, copyFile, lstat as fsStat, rm } from "node:fs/promises";
 import { resolve, join, relative, basename } from "node:path";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -22,7 +22,7 @@ export async function createSnapshot(workdir: string, label?: string): Promise<S
   const snapPath = resolve(snapshotDir, id);
   await mkdir(snapPath, { recursive: true });
 
-  const skip = new Set(["node_modules", ".git", "dist", "build", ".openmythos", "runs"]);
+  const skip = new Set(["node_modules", ".git", "dist", "build", ".openmythos", "runs", ".supercache", ".quarantine"]);
   let fileCount = 0;
 
   async function copyDir(src: string, dst: string): Promise<void> {
@@ -31,14 +31,15 @@ export async function createSnapshot(workdir: string, label?: string): Promise<S
       if (skip.has(entry)) continue;
       const srcPath = join(src, entry);
       const dstPath = join(dst, entry);
-      const entryStat = await stat(srcPath);
+      const entryStat = await fsStat(srcPath);
       if (entryStat.isDirectory()) {
         await mkdir(dstPath, { recursive: true });
         await copyDir(srcPath, dstPath);
-      } else {
+      } else if (entryStat.isFile()) {
         await copyFile(srcPath, dstPath);
         fileCount++;
       }
+      // Skip sockets, FIFOs, device files, symlinks — they can't be copied safely.
     }
   }
 
@@ -63,11 +64,11 @@ export async function restoreSnapshot(workdir: string, snapshotId: string): Prom
       if (skip.has(entry)) continue;
       const srcPath = join(src, entry);
       const dstPath = join(dst, entry);
-      const entryStat = await stat(srcPath);
+      const entryStat = await fsStat(srcPath);
       if (entryStat.isDirectory()) {
         await mkdir(dstPath, { recursive: true });
         await restoreDir(srcPath, dstPath);
-      } else {
+      } else if (entryStat.isFile()) {
         await copyFile(srcPath, dstPath);
       }
     }
@@ -180,7 +181,7 @@ export interface ImpactResult {
 }
 
 export async function analyzeImpact(workdir: string, symbol: string): Promise<ImpactResult> {
-  const skip = new Set(["node_modules", ".git", "dist", "build", ".openmythos", "runs"]);
+  const skip = new Set(["node_modules", ".git", "dist", "build", ".openmythos", "runs", ".supercache", ".quarantine"]);
   const exts = new Set([".ts", ".js", ".tsx", ".jsx", ".py", ".go", ".rs", ".java", ".rb", ".php", ".c", ".cpp", ".h"]);
   const files: Array<{ file: string; matches: number; lines: number[] }> = [];
   let totalMatches = 0;
@@ -192,7 +193,7 @@ export async function analyzeImpact(workdir: string, symbol: string): Promise<Im
       if (skip.has(entry)) continue;
       const fullPath = join(dir, entry);
       let entryStat;
-      try { entryStat = await stat(fullPath); } catch { continue; }
+      try { entryStat = await fsStat(fullPath); } catch { continue; }
       if (entryStat.isDirectory()) {
         await walk(fullPath, depth + 1);
       } else if (entryStat.isFile()) {

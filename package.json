@@ -8,7 +8,7 @@
     "openmythos": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp src/ui/splash.txt dist/ui/splash.txt",
     "test": "node --test dist/test/*.test.js",
     "check": "npm run build && npm test",
     "dev": "tsx src/index.ts",
