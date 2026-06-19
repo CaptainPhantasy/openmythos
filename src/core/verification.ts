@@ -7,6 +7,7 @@
 
 import { executeCommand } from "../tools/shell.js";
 import { runOmpTurn, verifyOmpAvailable, type OmpTurnResult } from "./omp-client.js";
+import { pickEmployee } from "./fleet.js";
 
 export type GateStatus = "pass" | "reject" | "skipped";
 
@@ -114,10 +115,15 @@ async function runWatcher(
     .replace("{stepId}", spec.id)
     .replace("{title}", spec.title)
     .replace("{description}", spec.description);
+  const employee = pickEmployee("watcher", 0);
   const turn = await runOmpTurn({
     prompt,
     workdir: repoDir,
     tag: `watcher:${spec.id}`,
+    temperature: employee.temperature,
+    modelProvider: employee.modelProvider,
+    modelId: employee.modelId,
+    employeeRole: employee.role,
   });
   const text = turn.text;
   let verdict: "pass" | "reject" = "reject";

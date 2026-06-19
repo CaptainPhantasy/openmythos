@@ -999,8 +999,6 @@ export function buildCli(): Command {
     .option("-n, --name <project>", "Project name for stoppage doc", "openmythos")
     .option("--max-redirects <n>", "In-place retries before kill", "3")
     .option("--max-replacements <n>", "Worker replacements before park", "3")
-    .option("--temp <t>", "Base worker temperature", "0.3")
-    .option("--temp-decrement <d>", "Temp drop per replacement", "0.2")
     .option("--no-splash", "Skip OMVOID banner before run")
     .action(async (options: LoopCliOptions) => {
       if (!options.noSplash) {
@@ -1013,8 +1011,6 @@ export function buildCli(): Command {
         projectName: options.name,
         maxRedirects: parseInt(options.maxRedirects, 10),
         maxReplacements: parseInt(options.maxReplacements, 10),
-        baseTemperature: parseFloat(options.temp),
-        temperatureDecrement: parseFloat(options.tempDecrement),
       });
       process.stdout.write("\n" + JSON.stringify(result, null, 2) + "\n");
       process.exitCode = result.status === "all_verified" ? 0 : 65;
@@ -1994,8 +1990,6 @@ interface LoopCliOptions {
   name: string;
   maxRedirects: string;
   maxReplacements: string;
-  temp: string;
-  tempDecrement: string;
   splash: boolean;
   noSplash: boolean;
 }

@@ -24,6 +24,9 @@ export interface OmpTurnOptions {
   ompBin?: string;
   modelProvider?: string;
   modelId?: string;
+  /** When set, injects OPENMYTHOS_EMPLOYEE_ROLE=<role> into the spawn env so the
+   *  employee-discipline hook can constrain this hire. */
+  employeeRole?: string;
 }
 
 export interface OmpTurnResult {
@@ -67,6 +70,7 @@ export function runOmpTurn(opts: OmpTurnOptions): Promise<OmpTurnResult> {
     ompBin = DEFAULT_OMP_BIN,
     modelProvider = DEFAULT_MODEL_PROVIDER,
     modelId = DEFAULT_MODEL_ID,
+    employeeRole,
   } = opts;
 
   return new Promise((resolve) => {
@@ -77,12 +81,14 @@ export function runOmpTurn(opts: OmpTurnOptions): Promise<OmpTurnResult> {
       cmd.push("--config", overlay);
     }
 
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    if (employeeRole) env.OPENMYTHOS_EMPLOYEE_ROLE = employeeRole;
     let proc: ChildProcess;
     try {
       proc = spawn(cmd[0]!, cmd.slice(1), {
         cwd: workdir,
         stdio: ["pipe", "pipe", "ignore"],
-        env: { ...process.env },
+        env,
       });
     } catch (e) {
       resolve({ tag, agentEnd: false, durationSec: 0, frames: [], tokensIn: 0, tokensOut: 0, text: `[spawn failed: ${String(e)}]` });

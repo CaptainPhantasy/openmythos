@@ -10,6 +10,7 @@
 //   6. On full exhaustion (retries + replacements): notify-and-park
 
 import { runOmpTurn } from "./omp-client.js";
+import { pickEmployee } from "./fleet.js";
 import { verifyStep, type StepSpec, type VerificationOutcome } from "./verification.js";
 import { createCheckpoint, rollbackTo, commitAll, ensureGitRepo, type Checkpoint } from "./checkpoint.js";
 import { notifyAndPark, loadMonitor, type ParkOutcome } from "./notify-park.js";
@@ -21,10 +22,6 @@ export interface LoopOptions {
   maxRedirects?: number;
   /** Worker replacements before notify-and-park. */
   maxReplacements?: number;
-  /** Base temperature for the first worker on a step. */
-  baseTemperature?: number;
-  /** Temperature decrement per replacement (floor 0.0). */
-  temperatureDecrement?: number;
   /** Where to write STOPPAGE.md on park. */
   parkDir?: string;
 }
@@ -52,8 +49,6 @@ export interface LoopResult {
 
 const DEFAULT_REDIRECTS = 3;
 const DEFAULT_REPLACEMENTS = 3;
-const DEFAULT_BASE_TEMP = 0.3;
-const DEFAULT_TEMP_DECREMENT = 0.2;
 
 /**
  * Run one step under the full worker/watcher/replace discipline.
@@ -75,14 +70,18 @@ export async function runStep(
   while (true) {
     // Inner redirect loop (worker keeps context within this loop).
     for (let attempt = 1; attempt <= maxRedirects + 1; attempt++) {
-      const temp = Math.max(0, opts.baseTemperature - opts.temperatureDecrement * replacements);
+      const employee = pickEmployee("worker", replacements);
       const prompt = feedback
         ? `${buildStepPrompt(spec)}\n\nA reviewer rejected your previous attempt: ${feedback}. Re-do, providing real evidence for every criterion.`
         : buildStepPrompt(spec);
 
-      process.stderr.write(`[step:${spec.id}] attempt ${attempt}/${maxRedirects + 1} replacement #${replacements} temp ${temp}\n`);
+      process.stderr.write(`[step:${spec.id}] attempt ${attempt}/${maxRedirects + 1} replacement #${replacements} temp ${employee.temperature}\n`);
       const turn = await runOmpTurn({
-        prompt, workdir, tag: `worker_r${replacements}#${attempt}`, temperature: temp,
+        prompt, workdir, tag: `worker_r${replacements}#${attempt}`,
+        temperature: employee.temperature,
+        modelProvider: employee.modelProvider,
+        modelId: employee.modelId,
+        employeeRole: employee.role,
       });
       tokensIn += turn.tokensIn; tokensOut += turn.tokensOut;
 
@@ -182,8 +181,6 @@ export async function runLoop(steps: StepSpec[], options: LoopOptions): Promise<
   const opts: Required<Omit<LoopOptions, "workdir" | "projectName">> = {
     maxRedirects: options.maxRedirects ?? DEFAULT_REDIRECTS,
     maxReplacements: options.maxReplacements ?? DEFAULT_REPLACEMENTS,
-    baseTemperature: options.baseTemperature ?? DEFAULT_BASE_TEMP,
-    temperatureDecrement: options.temperatureDecrement ?? DEFAULT_TEMP_DECREMENT,
     parkDir: options.parkDir ?? defaultParkDir(options.projectName),
   };
 
