@@ -28,6 +28,11 @@ import {
   summarizeToolValidationIssues
 } from "./tooling.js";
 import { buildExecutionBatches } from "./toposort.js";
+import { scanForSecrets, summarizeRisk, type SecurityFinding } from "./guardrails.js";
+import { routeModel, defaultRoutingPolicies, classifyComplexity, classifyRisk } from "./model-routing.js";
+import { loadRoutingStats, getAdaptiveRole } from "./adaptive-routing.js";
+import { estimateTokens, createBudget, remainingTokens, fitToWindow } from "./context-window.js";
+import { mapWithConcurrency } from "./fanout.js";
 import type { AdapterMessage, AdapterRequest, CommandReceipt, ContextResult, IntakeResult, Plan, PlanTask, QaResult, ReviewBundle, TaskExecutionReceipt, TaskObservation, TaskOutput, TaskStepResult, TaskToolRequest } from "./types.js";
 import type { ModelUsageMetric } from "../state/types.js";
 
@@ -66,10 +71,19 @@ export class PhaseExecutor {
   async context(intake: IntakeResult): Promise<ContextResult> {
     const query = [intake.description, ...intake.successCriteria].join("\n");
     const raw = await gatherContext(this.workdir, this.config.context, intake.relevantPatterns, query);
-    const filesText = Object.entries(raw.files)
-      .map(([path, content]) => `=== ${path} ===\n${content}`)
-      .join("\n\n");
+    const fileBlocks = Object.entries(raw.files)
+      .map(([path, content]) => `=== ${path} ===\n${content}`);
     const model = this.config.models.compressor;
+    // Context window management: reserve room for the system prompt, manifest,
+    // and the worker's output, then fit file blocks into the remaining budget.
+    // The harness never overflows the disposable worker's context window.
+    const reserved = estimateTokens(COMPRESSOR_SYSTEM) + estimateTokens(raw.manifest.join("\n")) + model.maxTokens;
+    const budget = createBudget(this.config.context.maxContextTokens, reserved);
+    const fit = fitToWindow(fileBlocks, remainingTokens(budget));
+    const filesText = fit.kept.join("\n\n");
+    const droppedNote = fit.dropped > 0
+      ? `\n\n[context-window: dropped ${fit.dropped} lower-priority file block(s) to fit the ${remainingTokens(budget)}-token budget]`
+      : "";
     const parsed = await this.callJson("compressor", "context", {
       system: COMPRESSOR_SYSTEM,
       maxTokens: model.maxTokens,
@@ -77,7 +91,7 @@ export class PhaseExecutor {
       json: true,
       messages: [{
         role: "user",
-        content: `Task:\n${intake.description}\n\nFile manifest:\n${raw.manifest.join("\n")}\n\nFiles:\n${filesText}`
+        content: `Task:\n${intake.description}\n\nFile manifest:\n${raw.manifest.join("\n")}\n\nFiles:\n${filesText}${droppedNote}`
       }]
     }, contextSchema) as ContextResult;
     return {
@@ -105,26 +119,72 @@ export class PhaseExecutor {
     let planned = await this.callJson("planner", "plan", buildPlanRequest(), planSchema) as Plan;
     let normalized = normalizePlanTools(planned);
     if (normalized.issues.length === 0) {
-      return normalized.plan;
+      return this.applyRouting(normalized.plan, intake);
     }
 
     const toolRepairNotes = summarizeToolValidationIssues(normalized.issues);
     planned = await this.callJson("planner", "plan", buildPlanRequest(`Tooling corrections required:\n${toolRepairNotes}\nUse only supported tool ids, and make them compatible with the task role.`), planSchema) as Plan;
     normalized = normalizePlanTools(planned);
     if (normalized.issues.length > 0) {
+      const roleRepairedPlan = this.repairHarnessTaskRoles(normalized.plan);
+      const roleRepairedNormalized = normalizePlanTools(roleRepairedPlan);
+      if (roleRepairedNormalized.issues.length === 0) {
+        return this.applyRouting(roleRepairedNormalized.plan, intake);
+      }
       throw new Error(`Plan referenced unsupported or mismatched tools after repair:\n${summarizeToolValidationIssues(normalized.issues)}`);
     }
 
-    return normalized.plan;
+    return this.applyRouting(normalized.plan, intake);
+  }
+
+  private repairHarnessTaskRoles(plan: Plan): Plan {
+    const repairedTasks = plan.tasks.map((task) => task.executor === "harness" && task.role !== "verifier"
+      ? { ...task, role: "verifier" as const }
+      : task
+    );
+    return {
+      ...plan,
+      tasks: repairedTasks
+    };
+  }
+
+  private async applyRouting(plan: Plan, intake: IntakeResult): Promise<Plan> {
+    const policies = defaultRoutingPolicies();
+    const stats = await loadRoutingStats(this.workdir);
+    const routedTasks = plan.tasks.map((task) => {
+      if (task.executor === "harness") return task;
+      const complexity = classifyComplexity(task.description, task.fileTargets.length, task.acceptanceCriteria.length * 20);
+      const riskLevel = classifyRisk(task.fileTargets.length, false, false);
+      const decision = routeModel(
+        { type: intake.taskType, complexity, riskLevel, requiresTools: task.requiredTools.length > 0 },
+        policies
+      );
+      // Adaptive override: if outcome history favors a role for this task type,
+      // use it over the static policy. The harness learns which disposable
+      // worker performs best per task type.
+      const candidates = Array.from(new Set([decision.role, ...decision.alternatives]));
+      const adaptive = getAdaptiveRole(stats, intake.taskType, candidates, decision.role);
+      const routedRole = adaptive.basedOnHistory ? adaptive.role : decision.role;
+      const routingReason = adaptive.basedOnHistory ? adaptive.reason : decision.reason;
+      return { ...task, routing: { taskType: intake.taskType, complexity, riskLevel, routedRole, routingReason } };
+    });
+    return { ...plan, tasks: routedTasks };
   }
 
   async execute(plan: Plan, context: ContextResult, intake?: IntakeResult, bypassReviewBlocking = false): Promise<TaskOutput[]> {
     const outputs: TaskOutput[] = [];
     this.taskReceipts = [];
     const batches = buildExecutionBatches(plan.tasks, plan.dependencies);
+    // Multi-agent fan-out with bounded concurrency: independent tasks in a
+    // dependency batch run in parallel, but never exceed the most restrictive
+    // configured model's concurrency limit (e.g. glm-5.2=2, glm-5.1=10).
+    const modelLimits = Object.values(this.config.models)
+      .map((m) => m.rateLimit?.requestsPerMinute)
+      .filter((n): n is number => typeof n === "number");
+    const maxConcurrency = modelLimits.length > 0 ? Math.max(1, Math.min(...modelLimits)) : 4;
 
     for (const batch of batches) {
-      const batchOutputs = await Promise.all(batch.map(async (task) => {
+      const batchOutputs = await mapWithConcurrency(batch, async (task) => {
         const resolvedTask: PlanTask = {
           ...task,
           verificationCommands: this.resolveTaskVerificationCommands(task, intake ?? null)
@@ -138,7 +198,7 @@ export class PhaseExecutor {
           this.config.approval
         );
         return { task: resolvedTask, execution, review };
-      }));
+      }, maxConcurrency);
 
       for (const item of batchOutputs) {
         this.reviews.push(item.review);
@@ -225,6 +285,33 @@ export class PhaseExecutor {
       } catch (error) {
         fileState[file] = `[read failed: ${(error as Error).message}]`;
       }
+    }
+
+    const guardrailFindings: SecurityFinding[] = [];
+    if (this.config.guardrails?.secretScan !== false) {
+      for (const file of changedFiles) {
+        const content = fileState[file];
+        if (content && !content.startsWith("[read failed:")) {
+          guardrailFindings.push(...scanForSecrets(content, file));
+        }
+      }
+    }
+    const guardrailSummary = summarizeRisk(guardrailFindings);
+    if (guardrailSummary.level === "dangerous") {
+      return {
+        passed: false,
+        score: 0,
+        issues: guardrailFindings.map((f) => ({
+          severity: "critical" as const,
+          description: `[${f.type}] ${f.description} in ${f.file}${f.line ? `:${f.line}` : ""} — ${f.recommendation}`,
+          file: f.file,
+          line: f.line,
+          suggestedFix: f.recommendation,
+        })),
+        suggestions: ["Remove hardcoded secrets before proceeding. Use environment variables or a secrets manager."],
+        verifiedCriteria: [],
+        failedCriteria: plan.successCriteria,
+      };
     }
 
     const model = this.config.models.verifier;
@@ -380,7 +467,7 @@ export class PhaseExecutor {
   ): Promise<{
     output: TaskOutput;
     executorKind: PlanTask["executor"];
-    executorRole: Extract<PlanTask["role"], "coder" | "critic" | "verifier">;
+    executorRole: PlanTask["role"];
     toolTurnCount: number;
     toolCallCount: number;
     observations: TaskObservation[];
@@ -488,7 +575,7 @@ export class PhaseExecutor {
     output: TaskOutput,
     review: ReviewBundle,
     executorKind: PlanTask["executor"],
-    executorRole: Extract<PlanTask["role"], "coder" | "critic" | "verifier">,
+    executorRole: PlanTask["role"],
     toolTurnCount: number,
     toolCallCount: number,
     observations: TaskObservation[],
@@ -687,7 +774,10 @@ export class PhaseExecutor {
     toolObservations: TaskObservation[];
     artifactPath: string | null;
   }> {
-    const role = task.role;
+    const taskRole = task.role;
+    const role = taskRole === "researcher" ? "planner" as const
+      : taskRole === "tester" || taskRole === "refactorer" || taskRole === "documenter" ? "coder" as const
+      : taskRole;
     const model = this.config.models[role];
     const currentFileState = await this.readCurrentFileState(task);
     const snippets = Object.entries(taskSnippets)

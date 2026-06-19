@@ -107,6 +107,7 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
   const types = await readOptional(resolve(repoRoot, "src/core/types.ts"));
   const cliSource = await readOptional(resolve(repoRoot, "src/ui/cli.ts"));
   const phasesSource = await readOptional(resolve(repoRoot, "src/core/phases.ts"));
+  const runnerSource = await readOptional(resolve(repoRoot, "src/core/runner.ts"));
   const tuiSource = await readOptional(resolve(repoRoot, "src/ui/tui.ts"));
   const hasCommand = (name: string) => cliSource.includes(`program.command("${name}")`);
   const hasSessionCommand = cliSource.includes('program.command("session")');
@@ -147,7 +148,7 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
     ["src/ui/cli.ts"],
     []
   );
-  const tuiInspectionEvidence = evidence("tui.inspect", "real", "TUI renders run lists, metrics, artifacts, and recent events.", ["src/ui/tui.ts"], []);
+  const tuiInspectionEvidence = evidence("tui.inspect", "real", "TUI renders run lists, metrics, focused artifact previews, and recent events.", ["src/ui/tui.ts"], []);
   const workflowControlEvidence = hasWorkflowControlCommands
     ? evidence(
       "cli.workflow.controls",
@@ -167,7 +168,7 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
     ? evidence(
       "tui.controls",
       "real",
-      "TUI binds approval, reject, cancel, queue, and replay hotkeys for selected runs.",
+      "TUI binds approval, reject, cancel, queue, replay, and artifact-navigation hotkeys for selected runs.",
       ["src/ui/tui.ts"],
       []
     )
@@ -193,6 +194,11 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
       ["src/core/phases.ts", "openmythos.config.json"],
       ["Add policy-backed verification presets by task class and risk."]
     );
+
+  const hasModelRoutingIntegration = phasesSource.includes("applyRouting") && phasesSource.includes("routeModel");
+  const hasGuardrailsIntegration = phasesSource.includes("scanForSecrets") && phasesSource.includes("summarizeRisk");
+  const hasWorktreeIntegration = runnerSource.includes("createWorktree") && runnerSource.includes("cleanupWorktree");
+  const hasMemoryIntegration = runnerSource.includes("addNote");
 
   const taskTools = extractToolUnion(types);
   const expectedTaskTools = ["shell.run", "package.install", "git.branch", "git.stage", "git.commit", "browser.verify", "api.request", "database.query"];
@@ -239,6 +245,7 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
   const hasClaudeBaseline = baselineReports[0].hasAnySummary;
   const hasCodexBaseline = baselineReports[1].hasAnySummary;
   const comparativeBaselineEvidence: EvidenceItem[] = [];
+  const comparativeCoverageMissingEvidence: EvidenceItem[] = [];
   if (!hasClaudeBaseline) {
     comparativeBaselineEvidence.push(
       evidence(
@@ -256,6 +263,15 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
           "comparative.claude.partial",
           "real",
           `Claude Code baseline coverage is partial: ${baselineReports[0].coveredFixtures.join(", ")} present; missing ${baselineReports[0].missingFixtures.join(", ")}.`,
+          baselineReports[0].summaryArtifacts,
+          ["Import a passing Claude Code comparative run for each missing fixture in the daily workflow suite."]
+        )
+      );
+      comparativeCoverageMissingEvidence.push(
+        evidence(
+          "comparative.claude.coverage.missing",
+          "missing",
+          `Claude Code baseline coverage is incomplete. Missing fixtures: ${baselineReports[0].missingFixtures.join(", ")}.`,
           baselineReports[0].summaryArtifacts,
           ["Import a passing Claude Code comparative run for each missing fixture in the daily workflow suite."]
         )
@@ -291,6 +307,15 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
           ["Import a passing Codex comparative run for each missing fixture in the daily workflow suite."]
         )
       );
+      comparativeCoverageMissingEvidence.push(
+        evidence(
+          "comparative.codex.coverage.missing",
+          "missing",
+          `Codex baseline coverage is incomplete. Missing fixtures: ${baselineReports[1].missingFixtures.join(", ")}.`,
+          baselineReports[1].summaryArtifacts,
+          ["Import a passing Codex comparative run for each missing fixture in the daily workflow suite."]
+        )
+      );
     } else {
       comparativeBaselineEvidence.push(evidence(
         "comparative.codex.present",
@@ -306,6 +331,7 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
     .filter((item): item is EvidenceItem => item !== null);
   const outcomeSuperiorityMissingEvidence = [evidence("comparative.baselines.missing", "missing", "No real-task benchmark suite with direct Claude Code and Codex baselines exists.", ["docs/plans/2026-06-14-openmythos-2027-default-harness-roadmap.md"], ["Add real repository benchmark tasks and retained baseline results for direct Claude Code and Codex runs."])]
     .concat(comparativeBaselineEvidence.filter((item) => item.level === "missing"))
+    .concat(comparativeCoverageMissingEvidence)
     .concat(strongestRealEval === null
       ? [evidence("real.eval.missing", "missing", "No passed real fixture-backed eval was found under runs/real-evals.", ["runs/real-evals"], ["Run retained live-eval on noop-js or trim-js and keep a real-evidence summary."])]
       : []);
@@ -350,7 +376,10 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
       "OpenMythos Has A Complete Execution Fabric",
       [
         evidence("bounded.tool.loop", "real", "Model task loop supports bounded tool requests and retained task-tool-turn artifacts.", ["src/core/phases.ts", "src/core/types.ts"], []),
-        evidence("dependency.batching", "real", "Execution batches dependency-free tasks and scopes downstream handoff context.", ["src/core/phases.ts"], [])
+        evidence("dependency.batching", "real", "Execution batches dependency-free tasks and scopes downstream handoff context.", ["src/core/phases.ts"], []),
+        ...(hasModelRoutingIntegration
+          ? [evidence("model.routing", "real", "Model routing policies classify tasks by complexity/risk and populate routing context on plan tasks.", ["src/core/phases.ts", "src/core/model-routing.ts"], [])]
+          : [])
       ],
       [],
       missingTaskTools.length > 0
@@ -365,7 +394,10 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
       [
         evidence("governance.review", "real", "Governance preflight, risk review, approval stops, and task verification receipts exist.", ["src/core/governance.ts", "src/core/review.ts", "src/core/phases.ts"], []),
         evidence("local.verification", "real", "Local and task-level verification commands gate runs before model QA.", ["src/core/phases.ts"], []),
-        verificationPresetEvidence
+        verificationPresetEvidence,
+        ...(hasGuardrailsIntegration
+          ? [evidence("guardrails.scan", "real", "Security guardrails scan changed files for secrets during verify phase, blocking QA on critical findings.", ["src/core/phases.ts", "src/core/guardrails.ts"], [])]
+          : [])
       ],
       [],
       []
@@ -378,7 +410,13 @@ async function assessProductGoals(repoRoot: string, liveEvalSummaries: LiveEvalS
         ...(missingRepoWorkflowCommands.length === 0
           ? [evidence("git.write.workflow", "real", "CLI exposes branch, stage, commit, rollback, publish-pr, and release-check workflow commands for repo lifecycle operations.", ["src/ui/cli.ts"], [])]
           : []
-        )
+        ),
+        ...(hasWorktreeIntegration
+          ? [evidence("worktree.isolation", "real", "Runner creates isolated git worktrees when enabled, with cleanup on completion and error paths.", ["src/core/runner.ts", "src/core/worktree.ts"], [])]
+          : []),
+        ...(hasMemoryIntegration
+          ? [evidence("repo.memory", "real", "Runner persists run notes to durable repository memory after successful completion.", ["src/core/runner.ts", "src/core/memory.ts"], [])]
+          : [])
       ],
       [],
       [
@@ -575,6 +613,10 @@ async function collectEvalSummaries(repoRoot: string): Promise<LiveEvalSummary[]
   const summaries = await findFiles(resolve(repoRoot, "runs"), "summary.json", 8);
   const parsed: LiveEvalSummary[] = [];
   for (const summaryPath of summaries) {
+    const relativePath = relative(repoRoot, summaryPath);
+    if (relativePath.startsWith("runs/comparative-baselines/") || relativePath.startsWith("runs/baseline-sources/")) {
+      continue;
+    }
     try {
       const raw = JSON.parse(await readFile(summaryPath, "utf8")) as {
         evidenceLevel?: unknown;
@@ -584,7 +626,7 @@ async function collectEvalSummaries(repoRoot: string): Promise<LiveEvalSummary[]
         successfulConsecutiveRounds?: unknown;
       };
       parsed.push({
-        path: relative(repoRoot, summaryPath),
+        path: relativePath,
         evidenceLevel: parseEvidenceLevel(raw.evidenceLevel, summaryPath),
         profile: typeof raw.profile === "string" ? raw.profile : "unknown",
         passed: raw.passed === true,

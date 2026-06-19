@@ -1,6 +1,8 @@
 node_modules/
 dist/
 runs/
+eval-*/
+suite-*/
 reviews/
 .env
 *.log
@@ -10,3 +12,5 @@ void-terminal/.claude/
 void-terminal/.omp/
 void-terminal/.harness/
 void-terminal/pebkac-starter/
+.quarantine/
+.openmythos/

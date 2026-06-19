@@ -1,19 +1,25 @@
 import type { AdapterRequest, AdapterResponse } from "../core/types.js";
 
+export type StreamTokenHandler = (token: string) => void;
+
 export interface ModelAdapter {
   call(request: AdapterRequest): Promise<AdapterResponse>;
+  callStream?(request: AdapterRequest, onToken: StreamTokenHandler): Promise<AdapterResponse>;
 }
 
 export async function fetchWithBackoff(
   url: string,
   init: RequestInit,
-  retries = 3
+  retries = 3,
+  timeoutMs = 120000
 ): Promise<Response> {
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const response = await fetch(url, init);
+      // Harness owns worker latency: a stuck/slow worker is aborted, never an
+      // infinite hang. AbortSignal.timeout fires per-attempt from creation.
+      const response = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
       if (response.ok) {
         return response;
       }

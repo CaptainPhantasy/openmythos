@@ -11,6 +11,7 @@ test("buildChatCompletionsBody includes ZAI thinking config and disables streami
     temperature: 0.2,
     baseUrl: "https://api.z.ai/api/coding/paas/v4",
     apiKeyEnv: "ZAI_API_KEY",
+    timeoutMs: 120000,
     thinking: {
       type: "enabled",
       clearThinking: true

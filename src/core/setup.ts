@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { access, constants } from "node:fs/promises";
 import { resolve } from "node:path";
+import { discoverConfigPath, formatConfigDiscoveryFailure, type ConfigDiscoverySource } from "../config/discovery.js";
 import { loadConfigWithOptionalProfile } from "../config/profile.js";
 import type { OpenMythosConfig } from "../config/schema.js";
 import { executeCommand } from "../tools/shell.js";
@@ -15,6 +16,8 @@ export interface SetupReport {
   timestamp: string;
   workdir: string;
   configPath: string;
+  configSearchPaths: string[];
+  configSource: ConfigDiscoverySource;
   profile: string | null;
   passed: boolean;
   config: {
@@ -76,7 +79,8 @@ function addRecommendation(list: string[], item: string): void {
 
 export async function runSetupCheck(options: SetupCheckOptions): Promise<SetupReport> {
   const workdir = resolveWorkdir(options.workdir);
-  const configPath = resolve(options.configPath);
+  const configResolution = discoverConfigPath(options.configPath, workdir);
+  const configPath = configResolution.path;
   const warnings: SetupCheckItem[] = [];
   const errors: SetupCheckItem[] = [];
   const recommendations: string[] = [];
@@ -86,12 +90,14 @@ export async function runSetupCheck(options: SetupCheckOptions): Promise<SetupRe
     errors.push({
       id: "config-missing",
       summary: `Config file not found: ${configPath}`,
-      detail: "Create or copy `openmythos.config.json`, then re-run setup."
+      detail: formatConfigDiscoveryFailure(configResolution)
     });
     return {
       timestamp: new Date().toISOString(),
       workdir,
       configPath,
+      configSearchPaths: configResolution.searched,
+      configSource: configResolution.source,
       profile: resolveProfileLabel(options.profileName),
       passed: false,
       config: { modelCount: 0, nonFakeModelCount: 0, requiredApiKeyVars: [] },
@@ -122,6 +128,8 @@ export async function runSetupCheck(options: SetupCheckOptions): Promise<SetupRe
       timestamp: new Date().toISOString(),
       workdir,
       configPath,
+      configSearchPaths: configResolution.searched,
+      configSource: configResolution.source,
       profile: resolveProfileLabel(options.profileName),
       passed: false,
       config: { modelCount: 0, nonFakeModelCount: 0, requiredApiKeyVars: [] },
@@ -186,6 +194,8 @@ export async function runSetupCheck(options: SetupCheckOptions): Promise<SetupRe
     timestamp: new Date().toISOString(),
     workdir,
     configPath,
+    configSearchPaths: configResolution.searched,
+    configSource: configResolution.source,
     profile: resolveProfileLabel(options.profileName),
     passed: errors.length === 0,
     config: {

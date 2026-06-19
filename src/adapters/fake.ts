@@ -1,5 +1,5 @@
 import type { AdapterRequest, AdapterResponse } from "../core/types.js";
-import type { ModelAdapter } from "./base.js";
+import type { ModelAdapter, StreamTokenHandler } from "./base.js";
 
 export class FakeAdapter implements ModelAdapter {
   async call(request: AdapterRequest): Promise<AdapterResponse> {
@@ -12,6 +12,17 @@ export class FakeAdapter implements ModelAdapter {
       outputTokens: content.length,
       durationMs: Date.now() - started
     };
+  }
+
+  async callStream(request: AdapterRequest, onToken: StreamTokenHandler): Promise<AdapterResponse> {
+    const response = await this.call(request);
+    // Emit the content in deterministic word-sized chunks so streaming consumers
+    // can be tested without a real network stream.
+    const chunks = response.content.match(/.{1,32}/g) ?? [response.content];
+    for (const chunk of chunks) {
+      onToken(chunk);
+    }
+    return response;
   }
 
   private responseFor(request: AdapterRequest): Record<string, unknown> {

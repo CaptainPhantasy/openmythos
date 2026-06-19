@@ -38,7 +38,7 @@ export interface PlanTask {
   id: string;
   title: string;
   description: string;
-  role: Extract<ModelRole, "coder" | "critic" | "verifier">;
+  role: Extract<ModelRole, "coder" | "critic" | "verifier" | "researcher" | "tester" | "refactorer" | "documenter">;
   executor: "model" | "harness";
   harnessAction: HarnessAction | null;
   contextQueries: string[];
@@ -47,6 +47,28 @@ export interface PlanTask {
   requiredTools: string[];
   verificationCommands: string[];
   executionMode: "parallel" | "serial";
+  routing?: RoutingContext;
+}
+
+export interface RoutingContext {
+  taskType: string;
+  complexity: "trivial" | "standard" | "complex" | "research";
+  riskLevel: "safe" | "moderate" | "high" | "critical";
+  routedRole: string;
+  routingReason: string;
+}
+
+export interface VerificationFinding {
+  type: "security" | "dependency" | "secret" | "lint" | "build" | "test" | "performance" | "policy";
+  severity: "critical" | "warning" | "info";
+  message: string;
+  file?: string;
+}
+
+export interface WorktreeContext {
+  isolated: boolean;
+  worktreePath?: string;
+  branch?: string;
 }
 
 export interface CommandReceipt {
@@ -78,7 +100,7 @@ export interface TaskObservation {
 export interface TaskExecutionReceipt {
   taskId: string;
   executorKind: PlanTask["executor"];
-  executorRole: Extract<ModelRole, "coder" | "critic" | "verifier">;
+  executorRole: PlanTask["role"];
   harnessAction: PlanTask["harnessAction"];
   toolTurnCount: number;
   toolCallCount: number;

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -8,7 +8,7 @@ import { buildReviewMarkdown, collectGitReviewInput, runReview } from "../core/r
 import { executeCommand } from "../tools/shell.js";
 
 test("collectGitReviewInput captures modified and untracked files from a git worktree", async () => {
-  const repo = await mkdtemp(join(tmpdir(), "openmythos-review-input-"));
+  const repo = await realpath(await mkdtemp(join(tmpdir(), "openmythos-review-input-")));
   await git(repo, "init");
   await git(repo, "config", "user.email", "test@example.com");
   await git(repo, "config", "user.name", "OpenMythos Test");

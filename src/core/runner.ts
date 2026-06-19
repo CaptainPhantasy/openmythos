@@ -9,13 +9,21 @@ import { PhaseExecutor } from "./phases.js";
 import { evaluateGovernance, GovernanceViolationError } from "./governance.js";
 import { ApprovalRequiredError, ToolApprovalRequiredError } from "./review.js";
 import { buildRunMetrics } from "./metrics.js";
+import { createWorktree, cleanupWorktree, type WorktreeHandle } from "./worktree.js";
+import { addNote, addDecision } from "./memory.js";
+import { recordOutcome } from "./adaptive-routing.js";
 import type { ContextResult, IntakeResult, IssueContext, Plan, PullRequestContext, PullRequestVerification, QaResult, TaskOutput } from "./types.js";
 
 export interface RunResult {
   runId: string;
-  status: "completed" | "failed" | "awaiting_approval" | "running";
+  status: "queued" | "completed" | "failed" | "awaiting_approval" | "running";
   finalOutput: string | null;
   artifacts: string[];
+}
+
+export interface StartedRun {
+  runId: string;
+  result: Promise<RunResult>;
 }
 
 export class Runner {
@@ -26,10 +34,18 @@ export class Runner {
   ) {}
 
   async run(goal: string): Promise<RunResult> {
+    const started = await this.start(goal);
+    return started.result;
+  }
+
+  async start(goal: string): Promise<StartedRun> {
     const governance = await evaluateGovernance(this.config, this.workdir);
     const runId = randomUUID();
     await this.store.createRun(runId, goal, this.config.execution.maxRetries);
-    return this.executeFrom(runId, goal, governance);
+    return {
+      runId,
+      result: this.executeFrom(runId, goal, governance)
+    };
   }
 
   async runFromIssue(issue: IssueContext, goal: string): Promise<RunResult> {
@@ -61,21 +77,14 @@ export class Runner {
       throw new Error(`Run not found: ${runId}`);
     }
     if (state.status === "completed") {
-      return {
-        runId,
-        status: "completed",
-        finalOutput: state.finalOutput,
-        artifacts: await this.artifacts(runId)
-      };
+      return this.inspect(runId);
     }
     if (state.status === "awaiting_approval" && state.approved !== true) {
       await this.store.updatePhase(runId, state.currentPhase);
-      return {
-        runId,
-        status: "awaiting_approval",
-        finalOutput: state.finalOutput,
-        artifacts: await this.artifacts(runId)
-      };
+      return this.inspect(runId);
+    }
+    if (state.status === "queued") {
+      await this.store.startQueuedRun(runId);
     }
     return this.executeFrom(runId, state.goal, undefined, state.approved === true);
   }
@@ -85,8 +94,22 @@ export class Runner {
     return this.resume(runId);
   }
 
+  async inspect(runId: string): Promise<RunResult> {
+    const state = await this.store.loadRun(runId);
+    if (!state) {
+      throw new Error(`Run not found: ${runId}`);
+    }
+    return {
+      runId,
+      status: state.status,
+      finalOutput: state.finalOutput,
+      artifacts: await this.artifacts(runId)
+    };
+  }
+
   async reject(runId: string, reason: string): Promise<RunResult> {
     const state = await this.store.reject(runId, reason);
+    await this.syncStoredMetricsState(runId, state);
     return {
       runId,
       status: "failed",
@@ -97,6 +120,7 @@ export class Runner {
 
   async cancel(runId: string, reason: string): Promise<RunResult> {
     const state = await this.store.fail(runId, reason);
+    await this.syncStoredMetricsState(runId, state);
     return {
       runId,
       status: "failed",
@@ -107,9 +131,10 @@ export class Runner {
 
   async queue(runId: string): Promise<RunResult> {
     const state = await this.store.queue(runId);
+    await this.syncStoredMetricsState(runId, state);
     return {
       runId,
-      status: "running",
+      status: "queued",
       finalOutput: state.finalOutput,
       artifacts: await this.artifacts(runId)
     };
@@ -117,11 +142,7 @@ export class Runner {
 
   async replay(runId: string): Promise<RunResult> {
     await this.queue(runId);
-    const state = await this.store.loadRun(runId);
-    if (!state) {
-      throw new Error(`Run not found: ${runId}`);
-    }
-    return this.executeFrom(runId, state.goal);
+    return this.resume(runId);
   }
 
   private async executeFrom(
@@ -131,7 +152,15 @@ export class Runner {
     bypassReviewBlocking = false
   ): Promise<RunResult> {
     const runDir = this.store.runDir(runId);
-    const executor = new PhaseExecutor(this.config, new AdapterRegistry(this.config), this.workdir, runDir);
+    let worktreeHandle: WorktreeHandle | null = null;
+    let execWorkdir = this.workdir;
+    if (this.config.worktree?.enabled) {
+      worktreeHandle = await createWorktree(this.workdir);
+      if (worktreeHandle.isolated) {
+        execWorkdir = worktreeHandle.path;
+      }
+    }
+    const executor = new PhaseExecutor(this.config, new AdapterRegistry(this.config), execWorkdir, runDir);
     const started = Date.now();
 
     let intake = await this.store.readArtifact<IntakeResult>(runId, "intake.json");
@@ -214,6 +243,7 @@ export class Runner {
           await this.store.fail(runId, `QA failed after ${this.config.execution.maxRetries} retries`);
           await this.store.writeArtifact(runId, "final.md", finalOutput);
           await this.writeMetrics(runId, executor, context, plan, outputs, qa);
+          await this.recordRoutingOutcomes(plan, false, Date.now() - started);
           return {
             runId,
             status: "failed",
@@ -237,6 +267,13 @@ export class Runner {
       await this.store.writeArtifact(runId, "final.md", finalOutput);
       await this.store.complete(runId, finalOutput);
       await this.writeMetrics(runId, executor, context, plan, outputs, qa);
+      await this.recordRoutingOutcomes(plan, qa?.passed ?? false, Date.now() - started);
+      if (this.config.memory?.enabled !== false) {
+        await addNote(this.workdir, `Run ${runId}: ${goal}`, ["run"]).catch(() => {});
+      }
+      if (worktreeHandle?.isolated) {
+        await cleanupWorktree(worktreeHandle).catch(() => {});
+      }
       return {
         runId,
         status: "completed",
@@ -295,8 +332,12 @@ export class Runner {
         };
       }
       await this.store.fail(runId, (error as Error).message);
+      await this.recordRoutingOutcomes(plan, false, Date.now() - started);
       await this.event(runId, (await this.store.loadRun(runId))?.currentPhase ?? "intake", "run_failed", "error", "Run failed", [], Date.now() - started, (error as Error).message);
       await this.writeMetrics(runId, executor, context, plan, outputs, qa);
+      if (worktreeHandle?.isolated) {
+        await cleanupWorktree(worktreeHandle).catch(() => {});
+      }
       throw error;
     }
   }
@@ -377,5 +418,42 @@ export class Runner {
       verification: executor.verificationMetrics(),
       modelUsage: executor.snapshotModelUsage()
     }));
+  }
+
+  private async recordRoutingOutcomes(plan: Plan | null, passed: boolean, durationMs: number): Promise<void> {
+    if (!plan) return;
+    for (const task of plan.tasks) {
+      if (task.executor === "harness" || !task.routing) continue;
+      await recordOutcome(
+        this.workdir,
+        task.routing.taskType,
+        task.routing.routedRole,
+        passed,
+        durationMs
+      ).catch(() => {});
+    }
+  }
+
+  private async syncStoredMetricsState(runId: string, state: { status: RunResult["status"]; startedAt: string; completedAt: string | null; retryCount: number; phasesCompleted: string[] }): Promise<void> {
+    const metrics = await this.store.readArtifact<Record<string, unknown>>(runId, "metrics.json");
+    if (!metrics) {
+      return;
+    }
+
+    const completedAt = state.completedAt;
+    const totalDurationMs = Math.max(
+      0,
+      Date.parse(completedAt ?? new Date().toISOString()) - Date.parse(state.startedAt)
+    );
+
+    await this.store.writeArtifact(runId, "metrics.json", {
+      ...metrics,
+      status: state.status,
+      startedAt: state.startedAt,
+      completedAt,
+      retryCount: state.retryCount,
+      phaseCount: state.phasesCompleted.length,
+      totalDurationMs
+    });
   }
 }

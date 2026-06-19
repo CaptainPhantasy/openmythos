@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { access } from "node:fs/promises";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -16,9 +17,10 @@ test("loadRealEvalFixture reads the retained real fixture manifest", async () =>
 test("loadRealEvalSuite reads a retained multi-fixture suite manifest", async () => {
   const suite = await loadRealEvalSuite("daily-workflow-suite");
   assert.equal(suite.id, "daily-workflow-suite");
-  assert.equal(suite.fixtures.length, 2);
+  assert.equal(suite.fixtures.length, 3);
   assert.equal(suite.fixtures[0]?.id, "noop-js");
   assert.equal(suite.fixtures[1]?.id, "trim-js");
+  assert.equal(suite.fixtures[2]?.id, "validate-email");
 });
 
 test("usesFakeAdapter detects fake-backed model configurations", () => {
@@ -65,4 +67,15 @@ test("assessRealEvalFixture fails until the expected source file is changed", as
   assert.equal(passing.expectedChangedFilesSatisfied, true);
   assert.equal(passing.verificationResults[0]?.exitCode, 0);
   assert.deepEqual(passing.prohibitedArtifactsDetected, []);
+});
+
+test("copyRealEvalFixture copies active harness config into fixture repos when requested", async () => {
+  const root = await mkdtemp(join(tmpdir(), "openmythos-real-eval-config-"));
+  const repoDir = resolve(root, "repo");
+  const configPath = resolve(process.cwd(), "openmythos.config.json");
+
+  const fixture = await copyRealEvalFixture("noop-js", repoDir, configPath);
+  assert.equal(fixture.id, "noop-js");
+
+  await access(resolve(repoDir, "openmythos.config.json"));
 });

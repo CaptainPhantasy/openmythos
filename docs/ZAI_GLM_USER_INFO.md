@@ -51,6 +51,16 @@ verifier   -> glm-5.1
 This is conservative. It avoids moving the harness to GLM-5.2 before there is
 separate evidence that 5.2 behaves correctly in this workflow.
 
+### Endpoint aliasing (verified 2026-06-15)
+
+The coding endpoint serves a requested `glm-5.1` as `glm-5.2`: the request
+sends `model: glm-5.1` but the response reports `model: glm-5.2` (confirmed via
+`scripts/diag-model.mjs glm-5.1`). The `glm-5.1` SKU therefore gets 5.2-class
+quality while keeping the 5.1 concurrency limit (10). Requesting `glm-5.2`
+directly uses the 5.2 SKU (limit 2). The harness fan-out cap derives from each
+model's configured `rateLimit.requestsPerMinute`, so keep `glm-5.1` at 10 and
+`glm-5.2` at 2 to match the SKU limits regardless of the served model.
+
 ## Thinking Configuration
 
 GLM-5.1, GLM-5, and the GLM-4.7 series activate thinking by default. GLM-4.6

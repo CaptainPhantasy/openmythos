@@ -5,7 +5,11 @@ export const modelRoleSchema = z.enum([
   "compressor",
   "coder",
   "critic",
-  "verifier"
+  "verifier",
+  "researcher",
+  "tester",
+  "refactorer",
+  "documenter"
 ]);
 
 export type ModelRole = z.infer<typeof modelRoleSchema>;
@@ -100,6 +104,7 @@ export const modelConfigSchema = z.object({
   temperature: z.number().min(0).max(2).default(0.2),
   baseUrl: z.string().url().optional(),
   apiKeyEnv: z.string().min(1).optional(),
+  timeoutMs: z.number().int().positive().default(120000),
   thinking: thinkingConfigSchema,
   rateLimit: rateLimitConfigSchema
 });
@@ -116,11 +121,14 @@ export const openMythosConfigSchema = z.object({
     maxRetries: z.number().int().min(0).default(3),
     maxTaskToolTurns: z.number().int().min(0).default(3),
     timeoutMs: z.number().int().positive().default(120000),
+    minPolishRounds: z.number().int().min(0).default(1),
+    requireAdversarialReview: z.boolean().default(true),
     workingDirectory: z.string().default(".")
   }).default({}),
   context: z.object({
     maxFiles: z.number().int().positive().default(80),
     maxFileSizeBytes: z.number().int().positive().default(120000),
+    maxContextTokens: z.number().int().positive().default(100000),
     ignorePatterns: z.array(z.string()).default([]),
     ignoreExtensions: z.array(z.string()).default([])
   }).default({}),
@@ -130,7 +138,38 @@ export const openMythosConfigSchema = z.object({
     presets: verificationPresetsSchema
   }).default({}),
   approval: approvalConfigSchema,
-  governance: governanceConfigSchema
+  governance: governanceConfigSchema,
+  routing: z.object({
+    policies: z.array(z.object({
+      taskType: z.string(),
+      preferredRole: z.string(),
+      fallbackRole: z.string().optional(),
+      maxLatencyMs: z.number().optional(),
+      maxCostCents: z.number().optional(),
+    })).default([]),
+    defaultComplexityThreshold: z.object({
+      trivial: z.number().default(50),
+      standard: z.number().default(500),
+      complex: z.number().default(2000),
+    }).default({}),
+  }).default({}),
+  memory: z.object({
+    enabled: z.boolean().default(true),
+    persistNotes: z.boolean().default(true),
+    persistDecisions: z.boolean().default(true),
+    maxNotes: z.number().default(100),
+  }).default({}),
+  worktree: z.object({
+    enabled: z.boolean().default(false),
+    autoCleanup: z.boolean().default(true),
+    basePath: z.string().default(".openmythos/worktrees"),
+  }).default({}),
+  guardrails: z.object({
+    secretScan: z.boolean().default(true),
+    dependencyAudit: z.boolean().default(true),
+    destructiveBlock: z.boolean().default(true),
+    customSecretPatterns: z.array(z.string()).default([]),
+  }).default({})
 });
 
 export type OpenMythosConfig = z.infer<typeof openMythosConfigSchema>;

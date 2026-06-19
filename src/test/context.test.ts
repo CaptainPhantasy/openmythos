@@ -19,6 +19,7 @@ test("gatherContext prioritizes relevant patterns", async () => {
   const context = await gatherContext(dir, {
     maxFiles: 2,
     maxFileSizeBytes: 1000,
+    maxContextTokens: 100000,
     ignorePatterns: [],
     ignoreExtensions: []
   }, ["src/*.ts"]);
@@ -47,6 +48,7 @@ test("gatherContext ranks files by query and extracts targeted snippets", async 
   const context = await gatherContext(dir, {
     maxFiles: 1,
     maxFileSizeBytes: 5000,
+    maxContextTokens: 100000,
     ignorePatterns: [],
     ignoreExtensions: []
   }, [], "create session token for auth");

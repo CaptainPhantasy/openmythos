@@ -1,0 +1,19 @@
+{
+  "id": "validate-email",
+  "name": "Email validation fix",
+  "description": "Fix an email validation helper so it correctly rejects missing domains and accepts standard formats.",
+  "goal": "Fix src/validate.js so isValidEmail returns true for standard email addresses (user@domain.tld) and returns false for inputs missing @, missing domain, or empty strings. Do not create marker files or unrelated outputs. Keep tests passing.",
+  "verificationCommands": [
+    "npm test"
+  ],
+  "expectedChangedFiles": [
+    "src/validate.js"
+  ],
+  "prohibitedArtifacts": [
+    "openmythos-fake-output.txt",
+    "alpha-report.txt",
+    "alpha.txt",
+    "beta.txt",
+    "handoff-report.txt"
+  ]
+}

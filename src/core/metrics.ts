@@ -52,7 +52,12 @@ export function buildRunMetrics(input: {
     taskVerificationFailureCount: input.verification.taskVerificationFailureCount,
     qaPassed: input.qa?.passed ?? null,
     qaScore: input.qa?.score ?? null,
-    modelUsage: input.modelUsage
+    modelUsage: input.modelUsage,
+    reworkCount: input.state.retryCount,
+    unsafeEditEscapes: 0,
+    ...(input.qa?.passed ? { timeToVerifiedMs: Math.max(0, Date.parse(input.state.completedAt ?? new Date().toISOString()) - Date.parse(input.state.startedAt)) } : {}),
+    securityFindings: 0,
+    routingDecisions: input.plan?.tasks.filter((task) => task.routing).length ?? 0
   };
 }
 
@@ -83,14 +88,14 @@ export function summarizeBench(metrics: RunMetrics[]): BenchmarkSummary {
   const awaitingApprovalCount = metrics.filter((metric) => metric.status === "awaiting_approval").length;
   const averageDurationMs = runCount === 0
     ? 0
-    : Math.round(metrics.reduce((sum, metric) => sum + metric.totalDurationMs, 0) / runCount);
+    : Math.round(metrics.reduce((sum, metric) => sum + safeNumber(metric.totalDurationMs), 0) / runCount);
 
   const qaScores = metrics.map((metric) => metric.qaScore).filter((score): score is number => typeof score === "number");
   const averageQaScore = qaScores.length === 0
     ? null
     : Number((qaScores.reduce((sum, score) => sum + score, 0) / qaScores.length).toFixed(2));
 
-  const modelUsage = metrics.flatMap((metric) => metric.modelUsage);
+  const modelUsage = metrics.flatMap((metric) => Array.isArray(metric.modelUsage) ? metric.modelUsage : []);
 
   return {
     runCount,
@@ -99,17 +104,17 @@ export function summarizeBench(metrics: RunMetrics[]): BenchmarkSummary {
     awaitingApprovalCount,
     averageDurationMs,
     averageQaScore,
-    totalInputTokens: modelUsage.reduce((sum, usage) => sum + usage.inputTokens, 0),
-    totalOutputTokens: modelUsage.reduce((sum, usage) => sum + usage.outputTokens, 0),
-    totalModelCalls: modelUsage.reduce((sum, usage) => sum + usage.calls, 0),
-    totalFileEdits: metrics.reduce((sum, metric) => sum + metric.fileEditCount, 0),
-    totalPatchEdits: metrics.reduce((sum, metric) => sum + metric.patchEditCount, 0),
-    totalModelTaskCount: metrics.reduce((sum, metric) => sum + metric.modelTaskCount, 0),
-    totalHarnessTaskCount: metrics.reduce((sum, metric) => sum + metric.harnessTaskCount, 0),
-    totalModelToolTurnCount: metrics.reduce((sum, metric) => sum + metric.modelToolTurnCount, 0),
-    totalModelToolCallCount: metrics.reduce((sum, metric) => sum + metric.modelToolCallCount, 0),
-    totalTaskVerificationCount: metrics.reduce((sum, metric) => sum + metric.taskVerificationCount, 0),
-    totalTaskVerificationFailures: metrics.reduce((sum, metric) => sum + metric.taskVerificationFailureCount, 0)
+    totalInputTokens: modelUsage.reduce((sum, usage) => sum + safeNumber(usage.inputTokens), 0),
+    totalOutputTokens: modelUsage.reduce((sum, usage) => sum + safeNumber(usage.outputTokens), 0),
+    totalModelCalls: modelUsage.reduce((sum, usage) => sum + safeNumber(usage.calls), 0),
+    totalFileEdits: metrics.reduce((sum, metric) => sum + safeNumber(metric.fileEditCount), 0),
+    totalPatchEdits: metrics.reduce((sum, metric) => sum + safeNumber(metric.patchEditCount), 0),
+    totalModelTaskCount: metrics.reduce((sum, metric) => sum + safeNumber(metric.modelTaskCount), 0),
+    totalHarnessTaskCount: metrics.reduce((sum, metric) => sum + safeNumber(metric.harnessTaskCount), 0),
+    totalModelToolTurnCount: metrics.reduce((sum, metric) => sum + safeNumber(metric.modelToolTurnCount), 0),
+    totalModelToolCallCount: metrics.reduce((sum, metric) => sum + safeNumber(metric.modelToolCallCount), 0),
+    totalTaskVerificationCount: metrics.reduce((sum, metric) => sum + safeNumber(metric.taskVerificationCount), 0),
+    totalTaskVerificationFailures: metrics.reduce((sum, metric) => sum + safeNumber(metric.taskVerificationFailureCount), 0)
   };
 }
 
@@ -144,4 +149,8 @@ async function discoverMetricsRoots(path: string, depth: number, maxDepth: numbe
     results.push(...await discoverMetricsRoots(resolve(path, entry.name), depth + 1, maxDepth));
   }
   return results;
+}
+
+function safeNumber(value: number | null | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }

@@ -23,6 +23,7 @@ tasks must be a JSON array. dependencies must be a JSON object mapping task ids 
 successCriteria, contextQueries, fileTargets, acceptanceCriteria, requiredTools, and verificationCommands must be JSON arrays of strings.
 executor must be exactly one of: model, harness.
 harnessAction must be null for model tasks. For harness tasks, harnessAction must be exactly one of: verify.file_state, verify.git_status, verify.git_diff, verify.issue_context, verify.pr_context, verify.pr_checks.
+For harness tasks, role must be verifier and requiredTools must use only harness-compatible tool ids.
 Allowed task roles: coder, critic, verifier. Keep each task small enough to verify.`;
 
 export const CODER_SYSTEM = `You implement one planned task.

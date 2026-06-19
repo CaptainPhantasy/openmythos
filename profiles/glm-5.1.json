@@ -1,0 +1,9 @@
+{
+  "models": {
+    "planner": { "model": "glm-5.1", "rateLimit": { "requestsPerMinute": 10 } },
+    "compressor": { "model": "glm-5.1", "rateLimit": { "requestsPerMinute": 10 } },
+    "coder": { "model": "glm-5.1", "rateLimit": { "requestsPerMinute": 10 } },
+    "critic": { "model": "glm-5.1", "rateLimit": { "requestsPerMinute": 10 } },
+    "verifier": { "model": "glm-5.1", "rateLimit": { "requestsPerMinute": 10 } }
+  }
+}

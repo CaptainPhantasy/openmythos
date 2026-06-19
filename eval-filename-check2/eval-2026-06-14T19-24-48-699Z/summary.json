@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "eval.v1",
+  "evidenceLevel": "smoke",
+  "passed": true,
+  "requiredConsecutiveRounds": 1,
+  "successfulConsecutiveRounds": 1,
+  "profile": "fake",
+  "evalRoot": "/Volumes/Storage/OpenMythos/eval-filename-check2/eval-2026-06-14T19-24-48-699Z",
+  "mode": "marker",
+  "results": [
+    {
+      "round": 1,
+      "status": "completed",
+      "runId": "fd7e42f7-9d13-4e3d-84e2-3a2b276a38db",
+      "workdir": "/Volumes/Storage/OpenMythos/eval-filename-check2/eval-2026-06-14T19-24-48-699Z/round-01"
+    }
+  ]
+}

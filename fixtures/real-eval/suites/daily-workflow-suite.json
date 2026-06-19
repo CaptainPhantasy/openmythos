@@ -1,7 +1,7 @@
 {
   "id": "daily-workflow-suite",
   "name": "OpenMythos Daily Workflow Suite",
-  "description": "Two deterministic repo tasks that require real edits, test updates, and proof of evidence",
+  "description": "Three deterministic repo tasks that require real edits, test updates, and proof of evidence",
   "fixtures": [
     {
       "id": "noop-js",
@@ -9,6 +9,10 @@
     },
     {
       "id": "trim-js",
+      "rounds": 1
+    },
+    {
+      "id": "validate-email",
       "rounds": 1
     }
   ]
